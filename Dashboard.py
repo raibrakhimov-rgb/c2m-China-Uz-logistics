@@ -1,162 +1,136 @@
 import streamlit as st
 import pandas as pd
 
-# ================= CONFIG =================
-
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/export?format=csv&gid=1730191747"
 
-# ================= LOAD =================
 
-@st.cache_data(ttl=300)
 def load_data():
-    df = pd.read_csv(SHEET_URL)
-    return df
+    try:
+        return pd.read_csv(SHEET_URL)
+    except Exception as e:
+        st.error("Ошибка загрузки данных")
+        st.exception(e)
+        return pd.DataFrame()
+
 
 df = load_data()
 
-# ================= PREPARE =================
-
-# Переименуем колонки для удобства
-df.columns = [
-    "Outbound_carton",
-    "Outbound_weight",
-    "Outbound_date",
-    "AWB",
-    "Flight",
-    "ETD",
-    "Comment",
-    "ETA",
-    "ATD",
-    "ATA",
-    "ATA_ext",
-    "Plan_transit"
-]
-
-# Даты
-date_cols = ["Outbound_date", "ETD", "ETA", "ATD", "ATA"]
-
-for col in date_cols:
-    df[col] = pd.to_datetime(df[col], errors="coerce")
-
-# Статус
-
-def get_status(row):
-    if pd.notna(row["ATA"]):
-        return "Delivered"
-    if pd.notna(row["ATD"]):
-        return "In Transit"
-    if pd.notna(row["ETD"]):
-        return "Scheduled"
-    return "Pending"
-
-df["Status"] = df.apply(get_status, axis=1)
-
-# ================= UI =================
-
-st.set_page_config(
-    page_title="China Logistics Dashboard",
-    layout="wide"
-)
+st.set_page_config("China Logistics Dashboard", layout="wide")
 
 st.title("✈️ China Logistics Dashboard")
 
-# ================= SIDEBAR =================
+if df.empty:
+    st.stop()
 
+# Очистка колонок
+df.columns = df.columns.str.strip()
+
+# Показываем колонки
+with st.expander("📌 Список колонок"):
+    st.write(df.columns.tolist())
+
+
+# Автоопределение колонок
+def find_col(name_list):
+    for col in df.columns:
+        for name in name_list:
+            if name.lower() in col.lower():
+                return col
+    return None
+
+
+COL_WEIGHT = find_col(["weight"])
+COL_FLIGHT = find_col(["flight"])
+COL_ETD = find_col(["etd"])
+COL_ETA = find_col(["eta"])
+COL_ATD = find_col(["atd"])
+COL_ATA = find_col(["ata"])
+COL_COMMENT = find_col(["comment", "коммент"])
+
+
+# Преобразование дат
+for c in [COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
+    if c:
+        df[c] = pd.to_datetime(df[c], errors="coerce")
+
+
+# Статус
+def get_status(row):
+    if COL_ATA and pd.notna(row[COL_ATA]):
+        return "Delivered"
+    if COL_ATD and pd.notna(row[COL_ATD]):
+        return "In Transit"
+    if COL_ETD and pd.notna(row[COL_ETD]):
+        return "Scheduled"
+    return "Pending"
+
+
+df["Status"] = df.apply(get_status, axis=1)
+
+
+# Sidebar
 st.sidebar.header("Фильтры")
 
-min_date = df["ETD"].min()
-max_date = df["ETD"].max()
+if COL_ETD:
+    min_d = df[COL_ETD].min()
+    max_d = df[COL_ETD].max()
 
-date_from = st.sidebar.date_input(
-    "ETD от",
-    min_date
-)
+    date_from = st.sidebar.date_input("ETD от", min_d)
+    date_to = st.sidebar.date_input("ETD до", max_d)
 
-date_to = st.sidebar.date_input(
-    "ETD до",
-    max_date
-)
+    df = df[
+        (df[COL_ETD] >= pd.to_datetime(date_from)) &
+        (df[COL_ETD] <= pd.to_datetime(date_to))
+    ]
 
-flights = st.sidebar.multiselect(
-    "Рейс",
-    df["Flight"].dropna().unique()
-)
 
-statuses = st.sidebar.multiselect(
-    "Статус",
-    df["Status"].unique(),
-    default=df["Status"].unique()
-)
+if COL_FLIGHT:
+    flights = st.sidebar.multiselect(
+        "Рейс",
+        df[COL_FLIGHT].dropna().unique()
+    )
 
-comments = st.sidebar.multiselect(
-    "Комментарий",
-    df["Comment"].dropna().unique()
-)
+    if flights:
+        df = df[df[COL_FLIGHT].isin(flights)]
 
-# ================= FILTER =================
 
-filtered = df.copy()
+# KPI
+c1, c2, c3, c4 = st.columns(4)
 
-filtered = filtered[
-    (filtered["ETD"] >= pd.to_datetime(date_from)) &
-    (filtered["ETD"] <= pd.to_datetime(date_to))
-]
+c1.metric("📦 Партии", len(df))
 
-if flights:
-    filtered = filtered[filtered["Flight"].isin(flights)]
+if COL_WEIGHT:
+    c2.metric("⚖️ Вес (кг)", int(df[COL_WEIGHT].sum()))
+else:
+    c2.metric("⚖️ Вес (кг)", 0)
 
-if comments:
-    filtered = filtered[filtered["Comment"].isin(comments)]
+c3.metric("✈️ В пути", len(df[df["Status"] == "In Transit"]))
+c4.metric("🏭 Доставлено", len(df[df["Status"] == "Delivered"]))
 
-filtered = filtered[filtered["Status"].isin(statuses)]
 
-# ================= KPI =================
+# График
+st.subheader("📈 Вылеты")
 
-c1, c2, c3, c4, c5 = st.columns(5)
+if COL_ETD and COL_WEIGHT:
 
-c1.metric("📦 Партии", len(filtered))
-c2.metric("⚖️ Вес (кг)", int(filtered["Outbound_weight"].sum()))
-c3.metric("✈️ В пути", len(filtered[filtered["Status"]=="In Transit"]))
-c4.metric("⏳ Запланировано", len(filtered[filtered["Status"]=="Scheduled"]))
-c5.metric("🏭 Доставлено", len(filtered[filtered["Status"]=="Delivered"]))
+    chart = df.groupby(COL_ETD)[COL_WEIGHT].sum()
+    st.line_chart(chart)
 
-# ================= CHART =================
+else:
+    st.warning("Нет данных для графика")
 
-st.subheader("📈 Вылеты по ETD")
 
-chart = (
-    filtered
-    .groupby("ETD")["Outbound_weight"]
-    .sum()
-)
-
-st.line_chart(chart)
-
-# ================= TABLE =================
-
+# Таблица
 st.subheader("📋 Партии")
 
-show_cols = [
-    "AWB",
-    "Flight",
-    "ETD",
-    "ETA",
-    "Status",
-    "Outbound_weight",
-    "Comment"
-]
+st.dataframe(df, use_container_width=True)
 
-st.dataframe(
-    filtered[show_cols]
-    .sort_values("ETD", ascending=False),
-    use_container_width=True
-)
 
-# ================= DOWNLOAD =================
-
+# Скачать
 st.download_button(
     "⬇️ Скачать CSV",
-    filtered.to_csv(index=False),
-    "china_logistics.csv",
+    df.to_csv(index=False),
+    "logistics.csv",
     "text/csv"
 )
+
