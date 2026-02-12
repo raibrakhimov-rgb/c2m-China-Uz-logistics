@@ -15,10 +15,9 @@ def load_data():
 df = load_data()
 
 st.set_page_config("China Logistics Dashboard", layout="wide")
-st.title("✈️ China Logistics Dashboard")
+st.title("✈️ China Logistics Control Center")
 
 if df.empty:
-    st.error("Нет данных")
     st.stop()
 
 
@@ -26,8 +25,6 @@ if df.empty:
 
 df.columns = df.columns.str.strip()
 
-
-# ================= FIND COLUMNS =================
 
 def find_col(keys):
     for col in df.columns:
@@ -37,35 +34,40 @@ def find_col(keys):
     return None
 
 
-COL_WEIGHT = find_col(["weight", "вес", "kg"])
-COL_FLIGHT = find_col(["flight", "рейс"])
+COL_WEIGHT = find_col(["weight", "kg", "вес"])
+COL_FLIGHT = find_col(["flight"])
 COL_ETD = find_col(["etd"])
 COL_ETA = find_col(["eta"])
 COL_ATD = find_col(["atd"])
 COL_ATA = find_col(["ata"])
 COL_AWB = find_col(["awb", "booking"])
 COL_COMMENT = find_col(["comment", "коммент"])
-COL_DATE = find_col(["outbound date", "date", "дата"])
+COL_POD = find_col(["pod"])
 
 
 # ================= DATES =================
 
-for c in [COL_ETD, COL_ETA, COL_ATD, COL_ATA, COL_DATE]:
+for c in [COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
     if c:
         df[c] = pd.to_datetime(df[c], errors="coerce")
 
 
+# ================= CLEAN WEIGHT =================
+
+if COL_WEIGHT:
+    df[COL_WEIGHT] = (
+        df[COL_WEIGHT]
+        .astype(str)
+        .str.replace(r"[^\d\.]", "", regex=True)
+    )
+
+    df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
+
+
 # ================= FILTER 2026+ =================
 
-BASE_DATE = None
-
 if COL_ETD:
-    BASE_DATE = COL_ETD
-elif COL_DATE:
-    BASE_DATE = COL_DATE
-
-if BASE_DATE:
-    df = df[df[BASE_DATE].dt.year >= 2026]
+    df = df[df[COL_ETD].dt.year >= 2026]
 
 
 # ================= STATUS =================
@@ -87,26 +89,46 @@ def get_status(row):
 df["Status"] = df.apply(get_status, axis=1)
 
 
+# ================= PLAN / FACT =================
+
+if COL_ETD and COL_ATD:
+    df["Delay_Departure_h"] = (
+        (df[COL_ATD] - df[COL_ETD])
+        .dt.total_seconds() / 3600
+    )
+
+if COL_ETA and COL_ATA:
+    df["Delay_Arrival_h"] = (
+        (df[COL_ATA] - df[COL_ETA])
+        .dt.total_seconds() / 3600
+    )
+
+
+# ================= TRANSIT =================
+
+if COL_ATD and COL_ATA:
+
+    df["Transit_days"] = (
+        (df[COL_ATA] - df[COL_ATD])
+        .dt.total_seconds() / 86400
+    )
+
+
+# ================= SLA =================
+
+SLA_LIMIT = 24  # часов
+
+
+if "Delay_Arrival_h" in df.columns:
+
+    df["SLA_OK"] = df["Delay_Arrival_h"] <= SLA_LIMIT
+
+
 # ================= SIDEBAR =================
 
 st.sidebar.header("Фильтры")
 
-if COL_ETD:
-
-    min_d = df[COL_ETD].min()
-    max_d = df[COL_ETD].max()
-
-    date_from = st.sidebar.date_input("ETD от", min_d)
-    date_to = st.sidebar.date_input("ETD до", max_d)
-
-    df = df[
-        (df[COL_ETD] >= pd.to_datetime(date_from)) &
-        (df[COL_ETD] <= pd.to_datetime(date_to))
-    ]
-
-
 if COL_FLIGHT:
-
     flights = st.sidebar.multiselect(
         "Рейс",
         sorted(df[COL_FLIGHT].dropna().unique())
@@ -116,110 +138,177 @@ if COL_FLIGHT:
         df = df[df[COL_FLIGHT].isin(flights)]
 
 
+if COL_COMMENT:
+    tags = st.sidebar.multiselect(
+        "UZUM / MPO",
+        df[COL_COMMENT].dropna().unique()
+    )
+
+    if tags:
+        df = df[df[COL_COMMENT].isin(tags)]
+
+
+if COL_POD:
+    pods = st.sidebar.multiselect(
+        "POD",
+        df[COL_POD].dropna().unique()
+    )
+
+    if pods:
+        df = df[df[COL_POD].isin(pods)]
+
+
 # ================= KPI =================
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 
 c1.metric("📦 Партии", len(df))
 
-
-if COL_WEIGHT:
-    total_weight = pd.to_numeric(df[COL_WEIGHT], errors="coerce").sum()
-else:
-    total_weight = 0
-
-c2.metric("⚖️ Вес (кг)", int(total_weight))
+c2.metric(
+    "⚖️ Вес (кг)",
+    int(df[COL_WEIGHT].sum()) if COL_WEIGHT else 0
+)
 
 c3.metric("✈️ В пути", len(df[df["Status"] == "In Transit"]))
+
 c4.metric("🏭 Доставлено", len(df[df["Status"] == "Delivered"]))
 
 
-# ================= CHART =================
-
-st.subheader("📈 Вылеты (по ETD)")
-
-if COL_ETD and COL_WEIGHT:
-
-    chart_df = (
-        df
-        .groupby(df[COL_ETD].dt.date)[COL_WEIGHT]
-        .sum()
-    )
-
-    if not chart_df.empty:
-        st.line_chart(chart_df)
-    else:
-        st.warning("Нет данных для графика")
-
+if "Transit_days" in df.columns:
+    c5.metric("⏱ Средний транзит (дн)", round(df["Transit_days"].mean(), 1))
 else:
-    st.warning("Нет данных для графика")
+    c5.metric("⏱ Средний транзит", "-")
 
 
-# ================= TABLE =================
-
-st.subheader("📋 Партии")
-
-
-display_cols = []
-
-for c in [
-    COL_AWB,
-    COL_FLIGHT,
-    COL_ETD,
-    COL_ETA,
-    COL_WEIGHT,
-    "Status",
-    COL_COMMENT
-]:
-    if c and c in df.columns:
-        display_cols.append(c)
+if "SLA_OK" in df.columns:
+    sla = round(df["SLA_OK"].mean() * 100, 1)
+    c6.metric("🎯 SLA %", sla)
+else:
+    c6.metric("🎯 SLA", "-")
 
 
-if "Status" not in display_cols:
-    display_cols.append("Status")
+# ================= TABS =================
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📈 Вылеты",
+    "✈️ Авиакомпании",
+    "🌍 POD",
+    "⏰ Просрочки",
+    "📋 Партии"
+])
 
 
-table = df[display_cols].copy()
+# ================= TAB 1 =================
+
+with tab1:
+
+    st.subheader("Вылеты по дням")
+
+    if COL_ETD and COL_WEIGHT:
+
+        chart = (
+            df
+            .groupby(df[COL_ETD].dt.date)[COL_WEIGHT]
+            .sum()
+            .sort_index()
+        )
+
+        st.line_chart(chart)
 
 
-# Красивые заголовки
-rename_map = {}
+# ================= TAB 2 =================
 
-if COL_AWB:
-    rename_map[COL_AWB] = "AWB"
+with tab2:
 
-if COL_FLIGHT:
-    rename_map[COL_FLIGHT] = "Flight"
+    st.subheader("По авиакомпаниям")
 
-if COL_ETD:
-    rename_map[COL_ETD] = "ETD"
+    if COL_FLIGHT:
 
-if COL_ETA:
-    rename_map[COL_ETA] = "ETA"
+        air = (
+            df
+            .groupby(COL_FLIGHT)
+            .agg({
+                COL_WEIGHT: "sum",
+                "Status": "count"
+            })
+            .rename(columns={
+                COL_WEIGHT: "Weight",
+                "Status": "Shipments"
+            })
+        )
 
-if COL_WEIGHT:
-    rename_map[COL_WEIGHT] = "Weight (kg)"
-
-if COL_COMMENT:
-    rename_map[COL_COMMENT] = "Comment"
+        st.dataframe(air.sort_values("Weight", ascending=False))
 
 
-table = table.rename(columns=rename_map)
+# ================= TAB 3 =================
+
+with tab3:
+
+    st.subheader("По POD")
+
+    if COL_POD:
+
+        pod = (
+            df
+            .groupby(COL_POD)[COL_WEIGHT]
+            .sum()
+        )
+
+        st.bar_chart(pod)
 
 
-st.dataframe(
-    table.sort_values("ETD", ascending=False),
-    use_container_width=True
-)
+# ================= TAB 4 =================
+
+with tab4:
+
+    st.subheader("Просрочки > 24ч")
+
+    if "Delay_Arrival_h" in df.columns:
+
+        delay = df[df["Delay_Arrival_h"] > SLA_LIMIT]
+
+        st.dataframe(delay)
+
+
+# ================= TAB 5 =================
+
+with tab5:
+
+    st.subheader("Список партий")
+
+    cols = []
+
+    for c in [
+        COL_AWB,
+        COL_FLIGHT,
+        COL_ETD,
+        COL_ETA,
+        COL_ATD,
+        COL_ATA,
+        COL_WEIGHT,
+        "Status",
+        COL_COMMENT
+    ]:
+        if c and c in df.columns:
+            cols.append(c)
+
+    if "Transit_days" in df.columns:
+        cols.append("Transit_days")
+
+    if "Delay_Arrival_h" in df.columns:
+        cols.append("Delay_Arrival_h")
+
+    st.dataframe(
+        df[cols].sort_values(COL_ETD, ascending=False),
+        use_container_width=True
+    )
 
 
 # ================= DOWNLOAD =================
 
 st.download_button(
-    "⬇️ Скачать CSV",
+    "⬇️ Скачать отчёт",
     df.to_csv(index=False),
-    "china_logistics_2026.csv",
+    "china_logistics_full_2026.csv",
     "text/csv"
 )
-
-
