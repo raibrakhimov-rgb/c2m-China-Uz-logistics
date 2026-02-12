@@ -9,7 +9,7 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9
 
 @st.cache_data(ttl=300)
 def load_data():
-    return pd.read_csv(SHEET_URL, header=2)
+    return pd.read_csv(SHEET_URL, header=1)
 
 
 df = load_data()
@@ -221,4 +221,5 @@ st.download_button(
     "china_logistics_2026.csv",
     "text/csv"
 )
+
 
