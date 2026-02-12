@@ -9,7 +9,13 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9
 
 @st.cache_data(ttl=300)
 def load_data():
-    return pd.read_csv(SHEET_URL, header=1)
+    # header=1 → заголовки во 2 строке
+    df = pd.read_csv(SHEET_URL, header=1)
+
+    # Берём только с 863 строки
+    df = df.iloc[862:].copy()
+
+    return df
 
 
 df = load_data()
@@ -26,6 +32,11 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 
+# Удаляем первую пустую колонку (нумерация)
+if df.columns[0].startswith("Unnamed"):
+    df = df.drop(columns=[df.columns[0]])
+
+
 def find_col(keys):
     for col in df.columns:
         for k in keys:
@@ -40,9 +51,9 @@ COL_ETD = find_col(["etd"])
 COL_ETA = find_col(["eta"])
 COL_ATD = find_col(["atd"])
 COL_ATA = find_col(["ata"])
+COL_ATA_EXT = find_col(["ata_ext"])
 COL_AWB = find_col(["awb", "booking"])
 COL_COMMENT = find_col(["comment", "коммент"])
-COL_POD = find_col(["pod"])
 
 
 # ================= DATES =================
@@ -93,14 +104,13 @@ df["Status"] = df.apply(get_status, axis=1)
 
 if COL_ETD and COL_ATD:
     df["Delay_Departure_h"] = (
-        (df[COL_ATD] - df[COL_ETD])
-        .dt.total_seconds() / 3600
+        (df[COL_ATD] - df[COL_ETD]).dt.total_seconds() / 3600
     )
+
 
 if COL_ETA and COL_ATA:
     df["Delay_Arrival_h"] = (
-        (df[COL_ATA] - df[COL_ETA])
-        .dt.total_seconds() / 3600
+        (df[COL_ATA] - df[COL_ETA]).dt.total_seconds() / 3600
     )
 
 
@@ -109,53 +119,40 @@ if COL_ETA and COL_ATA:
 if COL_ATD and COL_ATA:
 
     df["Transit_days"] = (
-        (df[COL_ATA] - df[COL_ATD])
-        .dt.total_seconds() / 86400
+        (df[COL_ATA] - df[COL_ATD]).dt.total_seconds() / 86400
     )
 
 
 # ================= SLA =================
 
-SLA_LIMIT = 24  # часов
+SLA_LIMIT = 24
 
 
 if "Delay_Arrival_h" in df.columns:
-
     df["SLA_OK"] = df["Delay_Arrival_h"] <= SLA_LIMIT
 
 
-# ================= SIDEBAR =================
+# ================= FORMAT DATES =================
 
-st.sidebar.header("Фильтры")
-
-if COL_FLIGHT:
-    flights = st.sidebar.multiselect(
-        "Рейс",
-        sorted(df[COL_FLIGHT].dropna().unique())
-    )
-
-    if flights:
-        df = df[df[COL_FLIGHT].isin(flights)]
+def fmt_date(col):
+    if col and col in df.columns:
+        return df[col].dt.strftime("%d.%m.%Y")
+    return None
 
 
-if COL_COMMENT:
-    tags = st.sidebar.multiselect(
-        "UZUM / MPO",
-        df[COL_COMMENT].dropna().unique()
-    )
-
-    if tags:
-        df = df[df[COL_COMMENT].isin(tags)]
+ETD_FMT = fmt_date(COL_ETD)
+ETA_FMT = fmt_date(COL_ETA)
+ATD_FMT = fmt_date(COL_ATD)
+ATA_FMT = fmt_date(COL_ATA)
 
 
-if COL_POD:
-    pods = st.sidebar.multiselect(
-        "POD",
-        df[COL_POD].dropna().unique()
-    )
+# ATA_ext → только время
 
-    if pods:
-        df = df[df[COL_POD].isin(pods)]
+if COL_ATA_EXT:
+    df[COL_ATA_EXT] = pd.to_datetime(
+        df[COL_ATA_EXT],
+        errors="coerce"
+    ).dt.strftime("%H:%M")
 
 
 # ================= KPI =================
@@ -170,14 +167,13 @@ c2.metric(
 )
 
 c3.metric("✈️ В пути", len(df[df["Status"] == "In Transit"]))
-
 c4.metric("🏭 Доставлено", len(df[df["Status"] == "Delivered"]))
 
 
 if "Transit_days" in df.columns:
-    c5.metric("⏱ Средний транзит (дн)", round(df["Transit_days"].mean(), 1))
+    c5.metric("⏱ Транзит (дн)", round(df["Transit_days"].mean(), 1))
 else:
-    c5.metric("⏱ Средний транзит", "-")
+    c5.metric("⏱ Транзит", "-")
 
 
 if "SLA_OK" in df.columns:
@@ -189,20 +185,16 @@ else:
 
 # ================= TABS =================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "📈 Вылеты",
-    "✈️ Авиакомпании",
-    "🌍 POD",
     "⏰ Просрочки",
-    "📋 Партии"
+    "📋 Список партий"
 ])
 
 
 # ================= TAB 1 =================
 
 with tab1:
-
-    st.subheader("Вылеты по дням")
 
     if COL_ETD and COL_WEIGHT:
 
@@ -220,86 +212,68 @@ with tab1:
 
 with tab2:
 
-    st.subheader("По авиакомпаниям")
-
-    if COL_FLIGHT:
-
-        air = (
-            df
-            .groupby(COL_FLIGHT)
-            .agg({
-                COL_WEIGHT: "sum",
-                "Status": "count"
-            })
-            .rename(columns={
-                COL_WEIGHT: "Weight",
-                "Status": "Shipments"
-            })
-        )
-
-        st.dataframe(air.sort_values("Weight", ascending=False))
-
-
-# ================= TAB 3 =================
-
-with tab3:
-
-    st.subheader("По POD")
-
-    if COL_POD:
-
-        pod = (
-            df
-            .groupby(COL_POD)[COL_WEIGHT]
-            .sum()
-        )
-
-        st.bar_chart(pod)
-
-
-# ================= TAB 4 =================
-
-with tab4:
-
     st.subheader("Просрочки > 24ч")
 
     if "Delay_Arrival_h" in df.columns:
 
         delay = df[df["Delay_Arrival_h"] > SLA_LIMIT]
 
-        st.dataframe(delay)
+        # Убираем мусорные колонки
+        delay = delay[[
+            COL_AWB,
+            COL_FLIGHT,
+            COL_ETD,
+            COL_ETA,
+            COL_ATA,
+            "Delay_Arrival_h",
+            COL_COMMENT
+        ]]
+
+        st.dataframe(delay, use_container_width=True)
 
 
-# ================= TAB 5 =================
+# ================= TAB 3 =================
 
-with tab5:
+with tab3:
 
     st.subheader("Список партий")
 
-    cols = []
 
-    for c in [
-        COL_AWB,
-        COL_FLIGHT,
-        COL_ETD,
-        COL_ETA,
-        COL_ATD,
-        COL_ATA,
-        COL_WEIGHT,
-        "Status",
-        COL_COMMENT
-    ]:
-        if c and c in df.columns:
-            cols.append(c)
+    table = pd.DataFrame()
 
-    if "Transit_days" in df.columns:
-        cols.append("Transit_days")
 
-    if "Delay_Arrival_h" in df.columns:
-        cols.append("Delay_Arrival_h")
+    if COL_AWB:
+        table["AWB"] = df[COL_AWB]
+
+    if COL_FLIGHT:
+        table["Flight"] = df[COL_FLIGHT]
+
+    if ETD_FMT is not None:
+        table["ETD"] = ETD_FMT
+
+    if ETA_FMT is not None:
+        table["ETA"] = ETA_FMT
+
+    if ATD_FMT is not None:
+        table["ATD"] = ATD_FMT
+
+    if ATA_FMT is not None:
+        table["ATA"] = ATA_FMT
+
+    if COL_ATA_EXT:
+        table["ATA_ext"] = df[COL_ATA_EXT]
+
+    if COL_WEIGHT:
+        table["Weight (kg)"] = df[COL_WEIGHT]
+
+    table["Status"] = df["Status"]
+
+    if COL_COMMENT:
+        table["Comment"] = df[COL_COMMENT]
+
 
     st.dataframe(
-        df[cols].sort_values(COL_ETD, ascending=False),
+        table.sort_values("ETD", ascending=False),
         use_container_width=True
     )
 
@@ -309,6 +283,6 @@ with tab5:
 st.download_button(
     "⬇️ Скачать отчёт",
     df.to_csv(index=False),
-    "china_logistics_full_2026.csv",
+    "china_logistics_2026_clean.csv",
     "text/csv"
 )
