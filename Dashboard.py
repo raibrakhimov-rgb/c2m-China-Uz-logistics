@@ -9,10 +9,10 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9
 
 @st.cache_data(ttl=300)
 def load_data():
-    # header=1 → заголовки во 2 строке
+
     df = pd.read_csv(SHEET_URL, header=1)
 
-    # Берём только с 863 строки
+    # Только с 863 строки
     df = df.iloc[862:].copy()
 
     return df
@@ -21,7 +21,10 @@ def load_data():
 df = load_data()
 
 st.set_page_config("China Logistics Dashboard", layout="wide")
-st.title("✈️ China Logistics Control Center")
+
+# ===== TITLE =====
+
+st.title("📊 Сводная по вылетам из Материкового Китая в Узбекистан")
 
 if df.empty:
     st.stop()
@@ -32,7 +35,7 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 
-# Удаляем первую пустую колонку (нумерация)
+# Убираем левую нумерацию
 if df.columns[0].startswith("Unnamed"):
     df = df.drop(columns=[df.columns[0]])
 
@@ -56,16 +59,37 @@ COL_AWB = find_col(["awb", "booking"])
 COL_COMMENT = find_col(["comment", "коммент"])
 
 
-# ================= DATES =================
+# ================= DATES (FIX MAIN BUG) =================
 
-for c in [COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
-    if c:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
+def parse_date(col):
+
+    if not col:
+        return None
+
+    return pd.to_datetime(
+        df[col],
+        errors="coerce",
+        dayfirst=True   # КРИТИЧНО!
+    )
+
+
+if COL_ETD:
+    df[COL_ETD] = parse_date(COL_ETD)
+
+if COL_ETA:
+    df[COL_ETA] = parse_date(COL_ETA)
+
+if COL_ATD:
+    df[COL_ATD] = parse_date(COL_ATD)
+
+if COL_ATA:
+    df[COL_ATA] = parse_date(COL_ATA)
 
 
 # ================= CLEAN WEIGHT =================
 
 if COL_WEIGHT:
+
     df[COL_WEIGHT] = (
         df[COL_WEIGHT]
         .astype(str)
@@ -75,10 +99,14 @@ if COL_WEIGHT:
     df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
 
 
-# ================= FILTER 2026+ =================
+# ================= FILTER 2026 =================
 
 if COL_ETD:
-    df = df[df[COL_ETD].dt.year >= 2026]
+
+    df = df[
+        (df[COL_ETD] >= "2026-01-01") &
+        (df[COL_ETD] <= "2026-12-31")
+    ]
 
 
 # ================= STATUS =================
@@ -100,17 +128,21 @@ def get_status(row):
 df["Status"] = df.apply(get_status, axis=1)
 
 
-# ================= PLAN / FACT =================
+# ================= DELAYS (DAYS) =================
 
-if COL_ETD and COL_ATD:
-    df["Delay_Departure_h"] = (
-        (df[COL_ATD] - df[COL_ETD]).dt.total_seconds() / 3600
+# Arrival delay (days)
+if COL_ETA and COL_ATA:
+
+    df["Delay_Arrival_d"] = (
+        (df[COL_ATA] - df[COL_ETA]).dt.days
     )
 
 
-if COL_ETA and COL_ATA:
-    df["Delay_Arrival_h"] = (
-        (df[COL_ATA] - df[COL_ETA]).dt.total_seconds() / 3600
+# Departure delay (days)
+if COL_ETD and COL_ATD:
+
+    df["Delay_Departure_d"] = (
+        (df[COL_ATD] - df[COL_ETD]).dt.days
     )
 
 
@@ -119,36 +151,38 @@ if COL_ETA and COL_ATA:
 if COL_ATD and COL_ATA:
 
     df["Transit_days"] = (
-        (df[COL_ATA] - df[COL_ATD]).dt.total_seconds() / 86400
+        (df[COL_ATA] - df[COL_ATD]).dt.days
     )
 
 
 # ================= SLA =================
 
-SLA_LIMIT = 24
+SLA_LIMIT = 1  # день
 
 
-if "Delay_Arrival_h" in df.columns:
-    df["SLA_OK"] = df["Delay_Arrival_h"] <= SLA_LIMIT
+if "Delay_Arrival_d" in df.columns:
+
+    df["SLA_OK"] = df["Delay_Arrival_d"] <= SLA_LIMIT
 
 
-# ================= FORMAT DATES =================
+# ================= FORMAT =================
 
-def fmt_date(col):
+def fmt(col):
+
     if col and col in df.columns:
         return df[col].dt.strftime("%d.%m.%Y")
+
     return None
 
 
-ETD_FMT = fmt_date(COL_ETD)
-ETA_FMT = fmt_date(COL_ETA)
-ATD_FMT = fmt_date(COL_ATD)
-ATA_FMT = fmt_date(COL_ATA)
+ETD_FMT = fmt(COL_ETD)
+ETA_FMT = fmt(COL_ETA)
+ATD_FMT = fmt(COL_ATD)
+ATA_FMT = fmt(COL_ATA)
 
-
-# ATA_ext → только время
 
 if COL_ATA_EXT:
+
     df[COL_ATA_EXT] = pd.to_datetime(
         df[COL_ATA_EXT],
         errors="coerce"
@@ -169,18 +203,17 @@ c2.metric(
 c3.metric("✈️ В пути", len(df[df["Status"] == "In Transit"]))
 c4.metric("🏭 Доставлено", len(df[df["Status"] == "Delivered"]))
 
+c5.metric(
+    "⏱ Транзит (дн)",
+    round(df["Transit_days"].mean(), 1)
+    if "Transit_days" in df.columns else "-"
+)
 
-if "Transit_days" in df.columns:
-    c5.metric("⏱ Транзит (дн)", round(df["Transit_days"].mean(), 1))
-else:
-    c5.metric("⏱ Транзит", "-")
-
-
-if "SLA_OK" in df.columns:
-    sla = round(df["SLA_OK"].mean() * 100, 1)
-    c6.metric("🎯 SLA %", sla)
-else:
-    c6.metric("🎯 SLA", "-")
+c6.metric(
+    "🎯 SLA %",
+    round(df["SLA_OK"].mean() * 100, 1)
+    if "SLA_OK" in df.columns else "-"
+)
 
 
 # ================= TABS =================
@@ -196,14 +229,15 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
 
+    st.subheader("Вылеты по партиям")
+
     if COL_ETD and COL_WEIGHT:
 
-        chart = (
-            df
-            .groupby(df[COL_ETD].dt.date)[COL_WEIGHT]
-            .sum()
-            .sort_index()
-        )
+        chart = df[[COL_ETD, COL_WEIGHT]].dropna()
+
+        chart = chart.sort_values(COL_ETD)
+
+        chart = chart.set_index(COL_ETD)
 
         st.line_chart(chart)
 
@@ -212,24 +246,27 @@ with tab1:
 
 with tab2:
 
-    st.subheader("Просрочки > 24ч")
+    st.subheader("Просрочки > 1 дня")
 
-    if "Delay_Arrival_h" in df.columns:
+    if "Delay_Arrival_d" in df.columns:
 
-        delay = df[df["Delay_Arrival_h"] > SLA_LIMIT]
+        delay = df[df["Delay_Arrival_d"] > 1]
 
-        # Убираем мусорные колонки
-        delay = delay[[
-            COL_AWB,
-            COL_FLIGHT,
-            COL_ETD,
-            COL_ETA,
-            COL_ATA,
-            "Delay_Arrival_h",
-            COL_COMMENT
-        ]]
+        table = pd.DataFrame()
 
-        st.dataframe(delay, use_container_width=True)
+        table["AWB"] = df[COL_AWB]
+        table["Flight"] = df[COL_FLIGHT]
+        table["ETD"] = ETD_FMT
+        table["ETA"] = ETA_FMT
+        table["ATD"] = ATD_FMT
+        table["ATA"] = ATA_FMT
+        table["Delay Arrival (d)"] = df["Delay_Arrival_d"]
+        table["Delay Departure (d)"] = df["Delay_Departure_d"]
+        table["Comment"] = df[COL_COMMENT]
+
+        table = table.loc[delay.index]
+
+        st.dataframe(table, use_container_width=True)
 
 
 # ================= TAB 3 =================
@@ -242,38 +279,26 @@ with tab3:
     table = pd.DataFrame()
 
 
-    if COL_AWB:
-        table["AWB"] = df[COL_AWB]
-
-    if COL_FLIGHT:
-        table["Flight"] = df[COL_FLIGHT]
-
-    if ETD_FMT is not None:
-        table["ETD"] = ETD_FMT
-
-    if ETA_FMT is not None:
-        table["ETA"] = ETA_FMT
-
-    if ATD_FMT is not None:
-        table["ATD"] = ATD_FMT
-
-    if ATA_FMT is not None:
-        table["ATA"] = ATA_FMT
+    table["AWB"] = df[COL_AWB]
+    table["Flight"] = df[COL_FLIGHT]
+    table["ETD"] = ETD_FMT
+    table["ETA"] = ETA_FMT
+    table["ATD"] = ATD_FMT
+    table["ATA"] = ATA_FMT
 
     if COL_ATA_EXT:
         table["ATA_ext"] = df[COL_ATA_EXT]
 
-    if COL_WEIGHT:
-        table["Weight (kg)"] = df[COL_WEIGHT]
-
+    table["Weight (kg)"] = df[COL_WEIGHT]
     table["Status"] = df["Status"]
+    table["Comment"] = df[COL_COMMENT]
 
-    if COL_COMMENT:
-        table["Comment"] = df[COL_COMMENT]
+
+    table = table.sort_values("ETD", ascending=False)
 
 
     st.dataframe(
-        table.sort_values("ETD", ascending=False),
+        table,
         use_container_width=True
     )
 
@@ -283,6 +308,6 @@ with tab3:
 st.download_button(
     "⬇️ Скачать отчёт",
     df.to_csv(index=False),
-    "china_logistics_2026_clean.csv",
+    "china_logistics_2026_fixed.csv",
     "text/csv"
 )
