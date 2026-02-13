@@ -305,7 +305,7 @@ with tab1:
         )
       .properties(
     height=420,
-    width=alt.Step(45))
+    width=alt.Step(45)
 
 
     st.altair_chart(chart, use_container_width=True)
@@ -405,4 +405,5 @@ with tab3:
 
 
     st.dataframe(table, use_container_width=True, hide_index=True)
+
 
