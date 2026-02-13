@@ -19,12 +19,22 @@ START_ROW = 862   # данные с 863 строки (0-based)
 
 @st.cache_data(ttl=600)
 def load_data():
-    df = pd.read_csv(SHEET_URL)
-    df = df.iloc[START_ROW:].reset_index(drop=True)
+
+    df = pd.read_csv(
+        SHEET_URL,
+        header=1   # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+    )
+
+    # Очищаем названия колонок
+    df.columns = df.columns.str.strip()
+
+    # Берём данные с 863 строки
+    df = df.iloc[862:].reset_index(drop=True)
+
+    # Убираем пустые строки
+    df = df.dropna(how="all")
+
     return df
-
-
-df = load_data()
 
 
 # ================= AUTO COLUMN MAP =================
@@ -317,3 +327,4 @@ with tab3:
     st.subheader("Список партий")
 
     st.dataframe(table, use_container_width=True)
+
