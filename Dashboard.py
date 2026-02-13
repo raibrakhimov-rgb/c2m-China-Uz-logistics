@@ -228,6 +228,9 @@ tab1, tab2, tab3 = st.tabs([
 import altair as alt
 import calendar
 
+import altair as alt
+import calendar
+
 
 with tab1:
 
@@ -247,10 +250,13 @@ with tab1:
         base = base.sort_values(COL_ETD)
 
 
+
         # =============================
         # GROUPING
         # =============================
 
+
+        # ----------- DAYS -----------
 
         if view == "По дням":
 
@@ -262,10 +268,19 @@ with tab1:
             )
 
             chart_df.columns = ["date", "weight"]
+
             chart_df["date"] = pd.to_datetime(chart_df["date"])
             chart_df["label"] = chart_df["date"].dt.strftime("%d.%m")
 
+            x_encoding = alt.X(
+                "date:T",
+                title="Дата",
+                axis=alt.Axis(format="%d.%m", labelAngle=-45)
+            )
 
+
+
+        # ----------- WEEKS -----------
 
         elif view == "По неделям":
 
@@ -279,18 +294,26 @@ with tab1:
                 .reset_index()
             )
 
-            chart_df["date"] = chart_df["week_start"]
-
             chart_df["label"] = (
                 chart_df["week_start"].dt.strftime("%d.%m")
                 + "–"
                 + chart_df["week_end"].dt.strftime("%d.%m")
             )
 
+            chart_df["date"] = chart_df["label"]
+
             chart_df = chart_df[["date", "label", COL_WEIGHT]]
             chart_df.columns = ["date", "label", "weight"]
 
+            x_encoding = alt.X(
+                "date:N",
+                title="Период",
+                sort=None
+            )
 
+
+
+        # ----------- MONTHS -----------
 
         else:  # По месяцам
 
@@ -303,19 +326,30 @@ with tab1:
                 .reset_index()
             )
 
-            chart_df["date"] = chart_df["month"].dt.start_time
+            chart_df["start"] = chart_df["month"].dt.start_time
 
             chart_df["label"] = (
-                chart_df["date"].dt.month.apply(lambda x: calendar.month_name[x])
+                chart_df["start"].dt.month.apply(lambda x: calendar.month_name[x])
                 + " "
-                + chart_df["date"].dt.year.astype(str)
+                + chart_df["start"].dt.year.astype(str)
             )
 
-            chart_df = chart_df[["date", "label", COL_WEIGHT]]
-            chart_df.columns = ["date", "label", "weight"]
+            chart_df["date"] = chart_df["label"]
+
+            chart_df = chart_df[["date", "label", COL_WEIGHT, "start"]]
+            chart_df.columns = ["date", "label", "weight", "start"]
+
+            chart_df = chart_df.sort_values("start")
+
+            x_encoding = alt.X(
+                "date:N",
+                title="Период",
+                sort=None
+            )
 
 
-        chart_df = chart_df.sort_values("date")
+
+        chart_df = chart_df.reset_index(drop=True)
 
 
 
@@ -326,16 +360,9 @@ with tab1:
 
         chart = (
             alt.Chart(chart_df)
-            .mark_bar(size=18)
+            .mark_bar(size=22)
             .encode(
-                x=alt.X(
-                    "date:T",
-                    title="Дата",
-                    axis=alt.Axis(
-                        labelAngle=-45,
-                        format="%d.%m"
-                    )
-                ),
+                x=x_encoding,
 
                 y=alt.Y(
                     "weight:Q",
@@ -433,4 +460,5 @@ st.download_button(
     "china_logistics_2026_dashboard.csv",
     "text/csv"
 )
+
 
