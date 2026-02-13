@@ -227,31 +227,14 @@ chart = (
     alt.Chart(chart_df)
     .mark_bar(size=50)
     .encode(
-        x=alt.X("x:O", axis=alt.Axis(labels=False, ticks=False)),
-        y=alt.Y(f"{COL_WEIGHT}:Q", title="Вес (кг)"),
-        tooltip=["label", COL_WEIGHT]
+        x=alt.X("x:O", title="Период"),
+        y=alt.Y("weight:Q", title="Вес (кг)"),
+        tooltip=["label", "weight"]
     )
     .properties(height=420)
 )
 
-labels = (
-    alt.Chart(chart_df)
-    .mark_text()
-    .encode(
-        x="x:O",
-        y=alt.value(0),
-        text="label",
-        angle=alt.value(-90),
-        dy=alt.value(15),
-        size=alt.value(11)
-    )
-)
-    .encode(
-        x="x:O",
-        y=alt.value(0),
-        text="label"
-    )
-)
+
 
 st.altair_chart(chart + labels, use_container_width=True)
 
@@ -394,5 +377,6 @@ with tab4:
     st.subheader("Исходные данные")
 
     st.dataframe(df, use_container_width=True)
+
 
 
