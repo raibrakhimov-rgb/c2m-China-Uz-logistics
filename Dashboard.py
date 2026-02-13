@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # 👉 ВСТАВЬ СЮДА СВОЮ ССЫЛКУ CSV
-SHEET_URL = "PASTE_YOUR_CSV_LINK_HERE"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/edit?gid=1730191747#gid=1730191747"
 
 
 # ================= LOAD DATA =================
@@ -279,3 +279,4 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
