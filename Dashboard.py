@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 
 
 # ================= CONFIG =================
@@ -16,7 +17,7 @@ def load_data():
 
     df = pd.read_csv(SHEET_URL, header=1)
 
-    # Берём данные с 863 строки
+    # Данные с 863 строки
     df = df.iloc[862:].copy()
 
     return df
@@ -224,9 +225,6 @@ tab1, tab2, tab3 = st.tabs([
 
 # ================= TAB 1 =================
 
-import altair as alt
-
-
 with tab1:
 
     st.subheader("✈️ Вылеты")
@@ -239,12 +237,13 @@ with tab1:
             horizontal=True
         )
 
+
         base = df[[COL_ETD, COL_WEIGHT]].dropna().copy()
 
         base = base.sort_values(COL_ETD)
 
 
-        # ===== GROUP =====
+        # ===== GROUPING =====
 
         if view == "По дням":
 
@@ -295,7 +294,7 @@ with tab1:
 
         chart = (
             alt.Chart(chart_df)
-            .mark_bar()
+            .mark_bar(size=18)
             .encode(
                 x=alt.X(
                     "date:T",
@@ -311,53 +310,10 @@ with tab1:
                     alt.Tooltip("weight:Q", title="Вес (кг)")
                 ]
             )
-            .properties(height=400)
+            .properties(height=420)
         )
 
         st.altair_chart(chart, use_container_width=True)
-
-
-        # ===== DAY =====
-        if view == "По дням":
-
-            chart = (
-                base
-                .groupby(base[COL_ETD].dt.date)[COL_WEIGHT]
-                .sum()
-            )
-
-            chart.index = pd.to_datetime(chart.index)
-
-            chart = chart.sort_index()
-
-            chart.index = chart.index.strftime("%d.%m")
-
-
-        # ===== WEEK =====
-        elif view == "По неделям":
-
-            chart = (
-                base
-                .groupby(base[COL_ETD].dt.to_period("W"))[COL_WEIGHT]
-                .sum()
-            )
-
-            chart.index = chart.index.astype(str)
-
-
-        # ===== MONTH =====
-        else:
-
-            chart = (
-                base
-                .groupby(base[COL_ETD].dt.to_period("M"))[COL_WEIGHT]
-                .sum()
-            )
-
-            chart.index = chart.index.astype(str)
-
-
-        st.bar_chart(chart)
 
 
 # ================= TAB 2 =================
@@ -439,4 +395,3 @@ st.download_button(
     "china_logistics_2026_dashboard.csv",
     "text/csv"
 )
-
