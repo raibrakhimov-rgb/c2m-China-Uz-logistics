@@ -246,7 +246,6 @@ labels = (
         size=alt.value(11)
     )
 )
-
     .encode(
         x="x:O",
         y=alt.value(0),
@@ -395,4 +394,5 @@ with tab4:
     st.subheader("Исходные данные")
 
     st.dataframe(df, use_container_width=True)
+
 
