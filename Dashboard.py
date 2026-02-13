@@ -224,6 +224,9 @@ tab1, tab2, tab3 = st.tabs([
 
 # ================= TAB 1 =================
 
+import altair as alt
+
+
 with tab1:
 
     st.subheader("✈️ Вылеты")
@@ -236,10 +239,82 @@ with tab1:
             horizontal=True
         )
 
-
         base = df[[COL_ETD, COL_WEIGHT]].dropna().copy()
 
         base = base.sort_values(COL_ETD)
+
+
+        # ===== GROUP =====
+
+        if view == "По дням":
+
+            chart_df = (
+                base
+                .groupby(base[COL_ETD].dt.date)[COL_WEIGHT]
+                .sum()
+                .reset_index()
+            )
+
+            chart_df.columns = ["date", "weight"]
+
+            chart_df["date"] = pd.to_datetime(chart_df["date"])
+
+
+        elif view == "По неделям":
+
+            chart_df = (
+                base
+                .groupby(base[COL_ETD].dt.to_period("W"))[COL_WEIGHT]
+                .sum()
+                .reset_index()
+            )
+
+            chart_df.columns = ["date", "weight"]
+
+            chart_df["date"] = chart_df["date"].dt.start_time
+
+
+        else:  # month
+
+            chart_df = (
+                base
+                .groupby(base[COL_ETD].dt.to_period("M"))[COL_WEIGHT]
+                .sum()
+                .reset_index()
+            )
+
+            chart_df.columns = ["date", "weight"]
+
+            chart_df["date"] = chart_df["date"].dt.start_time
+
+
+        chart_df = chart_df.sort_values("date")
+
+
+        # ===== ALTAIR =====
+
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "date:T",
+                    title="Дата",
+                    axis=alt.Axis(format="%d.%m")
+                ),
+                y=alt.Y(
+                    "weight:Q",
+                    title="Вес (кг)"
+                ),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Дата", format="%d.%m.%Y"),
+                    alt.Tooltip("weight:Q", title="Вес (кг)")
+                ]
+            )
+            .properties(height=400)
+        )
+
+        st.altair_chart(chart, use_container_width=True)
 
 
         # ===== DAY =====
@@ -364,3 +439,4 @@ st.download_button(
     "china_logistics_2026_dashboard.csv",
     "text/csv"
 )
+
