@@ -1,15 +1,11 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-import re
-from datetime import timedelta
+import requests
+from io import StringIO
+
 
 # ================== CONFIG ==================
-
-st.set_page_config(
-    page_title="C2M China → Uzbekistan",
-    layout="wide"
-)
 
 SHEET_ID = "1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA"
 GID = "1730191747"
@@ -17,16 +13,35 @@ GID = "1730191747"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
 
 
+START_ROW = 881   # с какой строки начинать (0 = первая)
+HEADER_ROW = 1    # где заголовки (строка 2)
+
+
 # ================== LOAD DATA ==================
 
 @st.cache_data(ttl=600)
 def load_data():
-    df = pd.read_csv(CSV_URL)
-    df.columns = [c.strip() for c in df.columns]
+
+    r = requests.get(CSV_URL)
+    r.encoding = "utf-8"
+
+    df = pd.read_csv(
+        StringIO(r.text),
+        skiprows=START_ROW,
+        header=HEADER_ROW
+    )
+
+    # Убираем пустые колонки
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+
+    # Чистим названия
+    df.columns = df.columns.str.strip()
+
     return df
 
 
 df = load_data()
+
 
 
 # ================== HELPERS ==================
@@ -290,4 +305,5 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
 
