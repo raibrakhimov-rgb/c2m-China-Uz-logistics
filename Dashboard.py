@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-import calendar
 
 
 # ================= CONFIG =================
@@ -23,29 +22,25 @@ MONTHS_RU = {
 }
 
 
-# ================= LOAD =================
+# ================= LOAD DATA =================
 
 @st.cache_data(ttl=600)
 def load_data():
 
     df = pd.read_csv(
         SHEET_URL,
-        header=1      # заголовки во 2-й строке
+        header=1
     )
 
-    # чистим названия
     df.columns = df.columns.str.strip()
 
-    # берём данные с 863 строки
     df = df.iloc[START_ROW:].reset_index(drop=True)
 
-    # убираем пустые строки
     df = df.dropna(how="all")
 
     return df
 
 
-# ===== load first =====
 df = load_data()
 
 
@@ -70,7 +65,7 @@ COL_ATD = find_col(["atd"])
 COL_ETA = find_col(["eta"])
 COL_ATA = find_col(["ata"])
 COL_AWB = find_col(["awb"])
-COL_FLIGHT = find_col(["flight", "рейс"])
+COL_FLIGHT = find_col(["flight"])
 COL_COMMENT = find_col(["comment", "коммент"])
 
 
@@ -96,12 +91,9 @@ if missing:
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce").fillna(0)
 
-
 for c in [COL_ETD, COL_ATD, COL_ETA, COL_ATA]:
     df[c] = pd.to_datetime(df[c], errors="coerce", dayfirst=True)
 
-
-# только 2026+
 df = df[df[COL_ETD].dt.year >= 2026]
 
 
@@ -129,10 +121,8 @@ total_weight = int(df[COL_WEIGHT].sum())
 in_transit = len(df[df["Status"] == "In Transit"])
 delivered = len(df[df["Status"] == "Delivered"])
 
-
 df["Transit_days"] = (df[COL_ATA] - df[COL_ETD]).dt.days
 avg_transit = df["Transit_days"].mean()
-
 
 sla = (df["Transit_days"] <= 7).mean() * 100
 
@@ -181,8 +171,7 @@ with tab1:
     base = base.sort_values(COL_ETD)
 
 
-
-    # -------- DAYS --------
+    # ---------- DAYS ----------
 
     if view == "По дням":
 
@@ -205,25 +194,23 @@ with tab1:
         )
 
 
-
-    # -------- WEEKS --------
+    # ---------- WEEKS ----------
 
     elif view == "По неделям":
 
-        base["week_start"] = base[COL_ETD].dt.to_period("W-MON").dt.start_time
-        base["week_end"] = base["week_start"] + pd.Timedelta(days=6)
+        base["week"] = base[COL_ETD].dt.to_period("W-MON")
 
         chart_df = (
             base
-            .groupby(["week_start", "week_end"])[COL_WEIGHT]
+            .groupby("week")[COL_WEIGHT]
             .sum()
             .reset_index()
         )
 
         chart_df["label"] = (
-            chart_df["week_start"].dt.strftime("%d.%m")
+            chart_df["week"].dt.start_time.dt.strftime("%d.%m")
             + "-"
-            + chart_df["week_end"].dt.strftime("%d.%m")
+            + chart_df["week"].dt.end_time.dt.strftime("%d.%m")
         )
 
         chart_df["date"] = chart_df["label"]
@@ -235,15 +222,11 @@ with tab1:
             "date:N",
             title="Период",
             sort=None,
-            scale=alt.Scale(
-                paddingInner=0,
-                paddingOuter=0,
-            )
+            scale=alt.Scale(paddingInner=0, paddingOuter=0)
         )
 
 
-
-    # -------- MONTHS --------
+    # ---------- MONTHS ----------
 
     else:
 
@@ -275,37 +258,33 @@ with tab1:
             "date:N",
             title="Период",
             sort=None,
-            scale=alt.Scale(
-                paddingInner=0,
-                paddingOuter=0,
-            )
+            scale=alt.Scale(paddingInner=0, paddingOuter=0)
         )
-
 
 
     chart_df = chart_df.reset_index(drop=True)
 
 
+    # ---------- CHART ----------
 
-    chart = (
-        alt.Chart(chart_df)
-        .mark_bar(size=22)
-        .encode(
-            x=x_enc,
+    chart = alt.Chart(chart_df).mark_bar(size=22).encode(
 
-            y=alt.Y(
-                "weight:Q",
-                title="Вес (кг)"
-            ),
+        x=x_enc,
 
-            tooltip=[
-                alt.Tooltip("label:N", title="Период"),
-                alt.Tooltip("weight:Q", title="Вес (кг)")
-            ]
-        )
-      .properties(
-    height=420,
-    width=alt.Step(45)
+        y=alt.Y(
+            "weight:Q",
+            title="Вес (кг)"
+        ),
+
+        tooltip=[
+            alt.Tooltip("label:N", title="Период"),
+            alt.Tooltip("weight:Q", title="Вес (кг)")
+        ]
+
+    ).properties(
+        height=420,
+        width=alt.Step(45)
+    )
 
 
     st.altair_chart(chart, use_container_width=True)
@@ -322,10 +301,10 @@ with tab2:
 
     delay = df.copy()
 
-    delay["Delay_Arrival_d"] = (delay[COL_ATA] - delay[COL_ETA]).dt.days
-    delay["Delay_Departure_d"] = (delay[COL_ATD] - delay[COL_ETD]).dt.days
+    delay["Delay_Arrival"] = (delay[COL_ATA] - delay[COL_ETA]).dt.days
+    delay["Delay_Departure"] = (delay[COL_ATD] - delay[COL_ETD]).dt.days
 
-    delay = delay[delay["Delay_Arrival_d"] > 0]
+    delay = delay[delay["Delay_Arrival"] > 0]
 
 
     for c in [COL_ETD, COL_ATD, COL_ETA, COL_ATA]:
@@ -339,8 +318,8 @@ with tab2:
         COL_ATD,
         COL_ETA,
         COL_ATA,
-        "Delay_Departure_d",
-        "Delay_Arrival_d",
+        "Delay_Departure",
+        "Delay_Arrival",
         COL_COMMENT
     ]]
 
@@ -348,12 +327,8 @@ with tab2:
     delay = delay.rename(columns={
         COL_AWB: "AWB",
         COL_FLIGHT: "Flight",
-        COL_ETD: "ETD",
-        COL_ATD: "ATD",
-        COL_ETA: "ETA",
-        COL_ATA: "ATA",
-        "Delay_Departure_d": "Delay Departure (d)",
-        "Delay_Arrival_d": "Delay Arrival (d)",
+        "Delay_Departure": "Delay Dep (d)",
+        "Delay_Arrival": "Delay Arr (d)",
         COL_COMMENT: "Comment"
     })
 
@@ -405,5 +380,3 @@ with tab3:
 
 
     st.dataframe(table, use_container_width=True, hide_index=True)
-
-
