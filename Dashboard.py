@@ -25,15 +25,22 @@ START_ROW = 862   # с какой строки тянуть (863 → индек�
 # ============================
 
 @st.cache_data(ttl=600)
+@st.cache_data(ttl=600)
 def load_data():
 
-    df = pd.read_csv(SHEET_URL)
+    df = pd.read_csv(
+        SHEET_URL,
+        header=1   # ← заголовки во 2-й строке
+    )
 
     df = df.iloc[START_ROW:].reset_index(drop=True)
 
     df = df.dropna(how="all")
 
+    df.columns = df.columns.str.strip()
+
     return df
+
 
 
 df = load_data()
@@ -359,3 +366,4 @@ with tab3:
         use_container_width=True,
         hide_index=True
     )
+
