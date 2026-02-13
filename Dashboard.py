@@ -236,7 +236,8 @@ chart = (
 
 
 
-st.altair_chart(chart + labels, use_container_width=True)
+st.altair_chart(chart, use_container_width=True)
+
 
 
 # ================= TABS =================
@@ -377,6 +378,7 @@ with tab4:
     st.subheader("Исходные данные")
 
     st.dataframe(df, use_container_width=True)
+
 
 
 
