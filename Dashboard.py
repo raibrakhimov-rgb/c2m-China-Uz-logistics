@@ -354,7 +354,11 @@ with tab3:
         table[c] = table[c].dt.strftime("%d.%m.%Y")
 
 
-    table["ATA_ext"] = table[COL_ATA].dt.strftime("%H:%M")
+    table["ATA_ext"] = pd.to_datetime(
+    table[COL_ATA],
+    errors="coerce"
+).dt.strftime("%H:%M")
+
 
 
     table = table[[
@@ -380,3 +384,4 @@ with tab3:
 
 
     st.dataframe(table, use_container_width=True, hide_index=True)
+
