@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 from io import BytesIO
 import matplotlib.pyplot as plt
-from datetime import timedelta
 
 
 # ================= CONFIG =================
@@ -13,20 +12,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# ТВОИ ДАННЫЕ (НЕ МЕНЯТЬ, ЕСЛИ ТАБЛИЦА ТА ЖЕ)
 SHEET_ID = "1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA"
 GID = "1730191747"
 
 XLSX_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx&gid={GID}"
 
 
-# ================= LOAD =================
-
-@st.cache_data(ttl=300)
-def load_data():
-
-    r = requests.get(XLSX_URL)
-    r.raise_for_status()
+# ================= LOAD DATA =================
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -37,31 +29,25 @@ def load_data():
     df = pd.read_excel(
         BytesIO(r.content),
         engine="openpyxl",
-        header=1   # заголовки во 2-й строке
+        header=1
     )
 
-    # убираем пустые строки
     df = df.dropna(how="all")
 
-    # убираем Unnamed
     df = df.loc[:, ~df.columns.astype(str).str.contains("^Unnamed")]
 
-    # чистим названия
     df.columns = df.columns.astype(str).str.strip()
 
-    # ================== ВАЖНО ==================
-    # Берём только строки с 867 и ниже (нумерация с 1)
+    # берём с 867 строки
     df = df.iloc[866:].reset_index(drop=True)
-    # ===========================================
 
     return df
-
 
 
 df = load_data()
 
 
-# ================= FIND COL =================
+# ================= FIND COLUMN =================
 
 def find_col(keys):
 
@@ -75,8 +61,6 @@ def find_col(keys):
 
     return None
 
-
-# ================= MAP COLUMNS =================
 
 COL_WEIGHT = find_col(["outbound weight", "weight", "kg", "вес"])
 COL_CARTON = find_col(["outbound carton", "carton"])
@@ -169,9 +153,9 @@ elif group == "По неделям":
     chart_df["end"] = chart_df["start"] + pd.Timedelta(days=6)
 
     chart_df["label"] = (
-        chart_df["start"].dt.strftime("%d.%m") +
-        "-" +
-        chart_df["end"].dt.strftime("%d.%m")
+        chart_df["start"].dt.strftime("%d.%m")
+        + "-"
+        + chart_df["end"].dt.strftime("%d.%m")
     )
 
     grouped = chart_df.groupby("label")[COL_WEIGHT].sum().reset_index()
@@ -236,14 +220,13 @@ with tab1:
 
     table = table.reset_index(drop=True)
 
-    # если колонка № уже есть — удаляем
     if "№" in table.columns:
         table = table.drop(columns=["№"])
 
-    # добавляем заново
     table.insert(0, "№", range(1, len(table) + 1))
 
     st.dataframe(table, use_container_width=True)
+
 
 # ================= SPLIT =================
 
@@ -281,7 +264,7 @@ with tab2:
 
             split_table = pd.DataFrame(rows)
 
-            split_table.insert(0, "№", range(1, len(split_table)+1))
+            split_table.insert(0, "№", range(1, len(split_table) + 1))
 
             st.dataframe(split_table, use_container_width=True)
 
@@ -291,7 +274,3 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
-
-
-
-
