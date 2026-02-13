@@ -28,12 +28,19 @@ def load_data():
     r = requests.get(XLSX_URL)
     r.raise_for_status()
 
+@st.cache_data(ttl=300)
+def load_data():
+
+    r = requests.get(XLSX_URL)
+    r.raise_for_status()
+
     df = pd.read_excel(
         BytesIO(r.content),
         engine="openpyxl",
-        header=1      # ← заголовки во 2-й строке
+        header=1   # заголовки во 2-й строке
     )
 
+    # убираем пустые строки
     df = df.dropna(how="all")
 
     # убираем Unnamed
@@ -42,7 +49,13 @@ def load_data():
     # чистим названия
     df.columns = df.columns.astype(str).str.strip()
 
+    # ================== ВАЖНО ==================
+    # Берём только строки с 867 и ниже (нумерация с 1)
+    df = df.iloc[866:].reset_index(drop=True)
+    # ===========================================
+
     return df
+
 
 
 df = load_data()
@@ -274,3 +287,4 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
