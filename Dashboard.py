@@ -42,6 +42,8 @@ def load_data():
 
 df = load_data()
 
+st.write("Колонки:", list(df.columns))
+st.dataframe(df.head(20))
 
 
 # ================== HELPERS ==================
@@ -305,5 +307,6 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
 
 
