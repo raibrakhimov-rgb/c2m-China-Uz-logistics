@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-
+from datetime import datetime
 
 # ================= CONFIG =================
 
@@ -10,33 +10,40 @@ st.set_page_config(
     layout="wide"
 )
 
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/export?format=csv&gid=1730191747"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/export?format=xlsx"
 
-START_ROW = 862
-
-
-MONTHS_RU = {
-    1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
-    5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
-    9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
-}
+START_ROW = 862  # с 863 строки
 
 
-# ================= LOAD DATA =================
+# ================= HELPERS =================
+
+def find_col(df, keys):
+    for col in df.columns:
+        for k in keys:
+            if k.lower() in str(col).lower():
+                return col
+    return None
+
+
+def month_ru(dt):
+    months = [
+        "январь","февраль","март","апрель","май","июнь",
+        "июль","август","сентябрь","октябрь","ноябрь","декабрь"
+    ]
+    return f"{months[dt.month-1]} {dt.year}"
+
+
+# ================= LOAD =================
 
 @st.cache_data(ttl=600)
 def load_data():
 
-    df = pd.read_csv(
-        SHEET_URL,
-        header=1
-    )
+    df = pd.read_excel(SHEET_URL)
+    df = df.iloc[START_ROW:].copy()
+    df.columns = df.iloc[0]
+    df = df[1:]
 
-    df.columns = df.columns.str.strip()
-
-    df = df.iloc[START_ROW:].reset_index(drop=True)
-
-    df = df.dropna(how="all")
+    df = df.reset_index(drop=True)
 
     return df
 
@@ -44,327 +51,184 @@ def load_data():
 df = load_data()
 
 
-# ================= FIND COLUMNS =================
+# ================= COLUMNS =================
 
-def find_col(keys):
+COL_WEIGHT = find_col(df, ["weight", "вес"])
+COL_ETD = find_col(df, ["etd"])
+COL_ATD = find_col(df, ["atd"])
+COL_ETA = find_col(df, ["eta"])
+COL_ATA = find_col(df, ["ata"])
+COL_AWB = find_col(df, ["awb"])
+COL_CARTON = find_col(df, ["carton"])
+COL_SPLIT = find_col(df, ["дроб"])
 
-    for col in df.columns:
+REQUIRED = [COL_WEIGHT, COL_ETD, COL_AWB]
 
-        name = str(col).lower()
-
-        for k in keys:
-            if k in name:
-                return col
-
-    return None
-
-
-COL_WEIGHT = find_col(["weight", "вес"])
-COL_ETD = find_col(["etd"])
-COL_ATD = find_col(["atd"])
-COL_ETA = find_col(["eta"])
-COL_ATA = find_col(["ata"])
-COL_AWB = find_col(["awb"])
-COL_FLIGHT = find_col(["flight"])
-COL_PROJECT = find_col(["проект"])
-COL_SPLIT = find_col(["дроб"])
-COL_CARTON = find_col(["carton"])
-COL_COMMENT = find_col(["коммент"])
-
-
-REQUIRED = [COL_WEIGHT, COL_ETD, COL_ATD, COL_ETA, COL_ATA, COL_AWB, COL_FLIGHT]
-
-if any(x is None for x in REQUIRED):
-
-    st.error("❌ Не найдены обязательные колонки")
+if None in REQUIRED:
+    st.error("Не найдены обязательные колонки")
     st.write(df.columns.tolist())
     st.stop()
 
 
 # ================= CLEAN =================
 
-df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce").fillna(0)
-
 for c in [COL_ETD, COL_ATD, COL_ETA, COL_ATA]:
-    df[c] = pd.to_datetime(df[c], errors="coerce", dayfirst=True)
+    if c:
+        df[c] = pd.to_datetime(df[c], errors="coerce")
 
-df = df.dropna(subset=[COL_ETD])
-
-df = df[df[COL_ETD].dt.year >= 2026]
-
-
-# ================= PROJECT FILTER =================
-
-st.title("✈️ Сводная по вылетам из Материкового Китая в Узбекистан")
-
-projects = ["Все"]
-
-if COL_PROJECT:
-    projects += sorted(df[COL_PROJECT].dropna().unique())
-
-selected = st.radio("Проект:", projects, horizontal=True)
-
-if selected != "Все" and COL_PROJECT:
-    df = df[df[COL_PROJECT] == selected]
+df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
+df[COL_CARTON] = pd.to_numeric(df[COL_CARTON], errors="coerce")
 
 
-# ================= METRICS =================
-
-delivered = df[df[COL_ATA].notna()]
-in_transit = df[df[COL_ATA].isna()]
-
-total_weight = int(df[COL_WEIGHT].sum())
-
-avg_transit = (
-    (delivered[COL_ATA] - delivered[COL_ETD])
-    .dt.days
-    .mean()
-)
-
-sla = (
-    (delivered[COL_ATA] <= delivered[COL_ETA])
-    .mean() * 100
-    if len(delivered) else 0
-)
+df = df[df[COL_ETD].dt.year == 2026]
+df = df.sort_values(COL_ETD)
 
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+# ================= HEADER =================
 
-c1.metric("📦 Партии", len(df))
-c2.metric("⚖️ Вес (кг)", total_weight)
-c3.metric("✈️ В пути", len(in_transit))
-c4.metric("📬 Доставлено", len(delivered))
-c5.metric("⏱ Транзит (дн)", round(avg_transit, 1) if avg_transit else 0)
-c6.metric("🎯 SLA %", round(sla, 1))
+st.title("📊 Сводная по вылетам из Материкового Китая в Узбекистан")
 
 
 # ================= TABS =================
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Вылеты",
-    "⏰ Просрочки",
+tab1, tab2, tab3 = st.tabs([
+    "✈️ Вылеты",
     "📋 Список партий",
     "📦 Дробленные партии"
 ])
 
 
-# =================================================
-# TAB 1 — CHART
-# =================================================
+# ================= CHART =================
 
 with tab1:
 
-    view = st.radio(
+    mode = st.radio(
         "",
         ["По дням", "По неделям", "По месяцам"],
         horizontal=True
     )
 
 
-    base = df[[COL_ETD, COL_WEIGHT]].copy()
-    base = base.dropna()
+    chart_df = df.copy()
+
+    if mode == "По дням":
+
+        chart_df["label"] = chart_df[COL_ETD].dt.strftime("%d.%m")
+
+        grp = chart_df.groupby("label", sort=False)[COL_WEIGHT].sum().reset_index()
 
 
-    # ---------- DAYS ----------
+    elif mode == "По неделям":
 
-    if view == "По дням":
-
-        chart_df = (
-            base
-            .groupby(base[COL_ETD].dt.date)[COL_WEIGHT]
-            .sum()
-            .reset_index()
-        )
-
-        chart_df.columns = ["date", "weight"]
-
-        chart_df["label"] = chart_df["date"].astype(str)
-
-
-
-    # ---------- WEEKS ----------
-
-    elif view == "По неделям":
-
-        base["week"] = base[COL_ETD].dt.to_period("W")
-
-        chart_df = (
-            base
-            .groupby("week")[COL_WEIGHT]
-            .sum()
-            .reset_index()
-        )
-
-        chart_df["start"] = chart_df["week"].dt.start_time
-        chart_df["end"] = chart_df["week"].dt.end_time
+        chart_df["week_start"] = chart_df[COL_ETD] - pd.to_timedelta(chart_df[COL_ETD].dt.weekday, unit="d")
+        chart_df["week_end"] = chart_df["week_start"] + pd.Timedelta(days=6)
 
         chart_df["label"] = (
-            chart_df["start"].dt.strftime("%d.%m")
-            + "-"
-            + chart_df["end"].dt.strftime("%d.%m")
+            chart_df["week_start"].dt.strftime("%d.%m") +
+            "-" +
+            chart_df["week_end"].dt.strftime("%d.%m")
         )
 
-        chart_df["weight"] = chart_df[COL_WEIGHT]
+        grp = chart_df.groupby("label", sort=False)[COL_WEIGHT].sum().reset_index()
 
 
+    else:  # month
 
-    # ---------- MONTHS ----------
+        chart_df["month"] = chart_df[COL_ETD].dt.to_period("M")
 
-    else:
+        chart_df["label"] = chart_df[COL_ETD].apply(month_ru)
 
-        base["month"] = base[COL_ETD].dt.to_period("M")
-
-        chart_df = (
-            base
-            .groupby("month")[COL_WEIGHT]
-            .sum()
-            .reset_index()
-        )
-
-        chart_df["dt"] = chart_df["month"].dt.to_timestamp()
-
-        chart_df["label"] = chart_df["dt"].apply(
-            lambda x: f"{MONTHS_RU[x.month]} {x.year}"
-        )
-
-        chart_df["weight"] = chart_df[COL_WEIGHT]
-
-        chart_df = chart_df.sort_values("dt")
+        grp = chart_df.groupby("label", sort=False)[COL_WEIGHT].sum().reset_index()
 
 
-    chart_df = chart_df.reset_index(drop=True)
+    grp["label"] = grp["label"].astype(str)
 
-    chart_df["x"] = chart_df.index.astype(str)
-
-
-
-    # ---------- CHART ----------
 
     chart = (
-        alt.Chart(chart_df)
-        .mark_bar(size=45)
+        alt.Chart(grp)
+        .mark_bar(size=28)
         .encode(
-            x=alt.X("x:O", title="Период"),
-            y=alt.Y("weight:Q", title="Вес (кг)"),
-            tooltip=[
-                alt.Tooltip("label:N", title="Период"),
-                alt.Tooltip("weight:Q", title="Вес (кг)")
-            ]
+            x=alt.X("label:O", title=""),
+            y=alt.Y(f"{COL_WEIGHT}:Q", title="Вес (кг)"),
+            tooltip=["label", COL_WEIGHT]
         )
         .properties(height=420)
     )
 
+
     st.altair_chart(chart, use_container_width=True)
 
 
-# =================================================
-# TAB 2 — DELAYS
-# =================================================
+# ================= LIST =================
 
 with tab2:
 
-    delay = df.copy()
-
-    delay["Delay_Arrival"] = (delay[COL_ATA] - delay[COL_ETA]).dt.days
-    delay["Delay_Departure"] = (delay[COL_ATD] - delay[COL_ETD]).dt.days
-
-    delay = delay[delay["Delay_Arrival"] > 0]
-
-
-    for c in [COL_ETD, COL_ATD, COL_ETA, COL_ATA]:
-        delay[c] = delay[c].dt.strftime("%d.%m.%Y")
-
-
-    delay = delay[[
-        COL_AWB,
-        COL_FLIGHT,
-        COL_ETD,
-        COL_ATD,
-        COL_ETA,
-        COL_ATA,
-        "Delay_Departure",
-        "Delay_Arrival",
-        COL_COMMENT
-    ]]
-
-
-    st.dataframe(delay, use_container_width=True, hide_index=True)
-
-
-# =================================================
-# TAB 3 — LIST
-# =================================================
-
-with tab3:
-
     table = df.copy()
+
+    table["ETD"] = table[COL_ETD].dt.strftime("%d.%m.%Y")
+    table["ATD"] = table[COL_ATD].dt.strftime("%d.%m.%Y") if COL_ATD else ""
+    table["ETA"] = table[COL_ETA].dt.strftime("%d.%m.%Y") if COL_ETA else ""
+    table["ATA"] = table[COL_ATA].dt.strftime("%d.%m.%Y") if COL_ATA else ""
+    table["ATA_ext"] = table[COL_ATA].dt.strftime("%H:%M") if COL_ATA else ""
 
     table = table.sort_values(COL_ETD, ascending=False)
 
+    view = table[
+        [
+            COL_AWB,
+            "ETD",
+            "ATD",
+            "ETA",
+            "ATA",
+            "ATA_ext",
+            COL_WEIGHT
+        ]
+    ]
 
-    for c in [COL_ETD, COL_ATD, COL_ETA, COL_ATA]:
-        table[c] = table[c].dt.strftime("%d.%m.%Y")
-
-
-    table["ATA_ext"] = pd.to_datetime(
-        table[COL_ATA],
-        errors="coerce"
-    ).dt.strftime("%H:%M")
-
-
-    table = table[[
-        COL_AWB,
-        COL_FLIGHT,
-        COL_ETD,
-        COL_ATD,
-        COL_ETA,
-        COL_ATA,
+    view.columns = [
+        "AWB",
+        "ETD",
+        "ATD",
+        "ETA",
+        "ATA",
         "ATA_ext",
-        COL_WEIGHT,
-        COL_COMMENT
-    ]]
+        "Weight (kg)"
+    ]
+
+    view = view.reset_index(drop=True)
+    view.index += 1
+
+    st.dataframe(view, use_container_width=True)
 
 
-    table = table.rename(columns={
-        COL_AWB: "AWB",
-        COL_FLIGHT: "Flight",
-        COL_WEIGHT: "Weight (kg)",
-        COL_COMMENT: "Comment"
-    })
+# ================= SPLIT =================
+
+with tab3:
+
+    if COL_SPLIT is None:
+        st.info("Нет колонки 'Дробление'")
+        st.stop()
 
 
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    split_df = df[df[COL_SPLIT].astype(str).str.lower() == "да"]
+
+    res = []
+
+    for awb, g in split_df.groupby(COL_AWB):
+
+        cartons = list(g[COL_CARTON].dropna().astype(int))
+
+        res.append({
+            "AWB": awb,
+            "Q-ty of flights": len(g),
+            "Total No of cartons": sum(cartons),
+            "Q-ty of separate cartons": ", ".join(map(str, cartons))
+        })
 
 
-# =================================================
-# TAB 4 — SPLIT
-# =================================================
+    out = pd.DataFrame(res)
 
-with tab4:
+    out.index += 1
+    out.insert(0, "№", out.index)
 
-    if COL_SPLIT and COL_CARTON:
-
-        tmp = df.copy()
-
-        tmp[COL_SPLIT] = tmp[COL_SPLIT].astype(str).str.lower()
-
-        split = tmp[tmp[COL_SPLIT].str.contains("да", na=False)]
-
-        result = (
-            split
-            .groupby(COL_AWB)
-            .agg(
-                flights=(COL_ETD, "count"),
-                cartons=(COL_CARTON, "sum"),
-                parts=(COL_CARTON, lambda x: ", ".join(x.astype(str)))
-            )
-            .reset_index()
-        )
-
-        result = result[result["flights"] >= 2]
-
-
-        st.dataframe(result, use_container_width=True)
-
-    else:
-        st.info("Колонки дробления не найдены")
+    st.dataframe(out, use_container_width=True)
