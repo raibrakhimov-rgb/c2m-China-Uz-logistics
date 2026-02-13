@@ -236,11 +236,17 @@ chart = (
 
 labels = (
     alt.Chart(chart_df)
-    .mark_text(
-        dy=15,
-        angle=-90,
-        fontSize=11
+    .mark_text()
+    .encode(
+        x="x:O",
+        y=alt.value(0),
+        text="label",
+        angle=alt.value(-90),
+        dy=alt.value(15),
+        size=alt.value(11)
     )
+)
+
     .encode(
         x="x:O",
         y=alt.value(0),
@@ -389,3 +395,4 @@ with tab4:
     st.subheader("Исходные данные")
 
     st.dataframe(df, use_container_width=True)
+
