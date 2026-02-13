@@ -238,7 +238,6 @@ with tab1:
             scale=alt.Scale(
                 paddingInner=0,
                 paddingOuter=0,
-                rangeStep=45
             )
         )
 
@@ -279,7 +278,6 @@ with tab1:
             scale=alt.Scale(
                 paddingInner=0,
                 paddingOuter=0,
-                rangeStep=45
             )
         )
 
@@ -305,8 +303,9 @@ with tab1:
                 alt.Tooltip("weight:Q", title="Вес (кг)")
             ]
         )
-        .properties(height=420)
-    )
+      .properties(
+    height=420,
+    width=alt.Step(45))
 
 
     st.altair_chart(chart, use_container_width=True)
@@ -406,3 +405,4 @@ with tab3:
 
 
     st.dataframe(table, use_container_width=True, hide_index=True)
+
