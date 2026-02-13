@@ -236,7 +236,13 @@ with tab1:
 
     table = table.reset_index(drop=True)
 
-    table.insert(0, "№", range(1, len(table)+1))
+    # если колонка № уже есть — удаляем
+if "№" in table.columns:
+    table = table.drop(columns=["№"])
+
+# добавляем заново
+table.insert(0, "№", range(1, len(table)+1))
+
 
     st.dataframe(table, use_container_width=True)
 
@@ -287,4 +293,5 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
 
