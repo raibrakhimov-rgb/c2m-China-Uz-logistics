@@ -27,8 +27,7 @@ def load_data():
 
     df = pd.read_csv(
         StringIO(r.text),
-        skiprows=START_ROW,
-        header=HEADER_ROW
+        header=1
     )
 
     # Убираем пустые колонки
@@ -307,6 +306,7 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
 
 
 
