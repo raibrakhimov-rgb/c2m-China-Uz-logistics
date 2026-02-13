@@ -225,25 +225,32 @@ tab1, tab2, tab3 = st.tabs([
 
 # ================= TAB 1 =================
 
+import altair as alt
+import calendar
+
+
 with tab1:
 
     st.subheader("✈️ Вылеты")
 
+
+    view = st.radio(
+        "",
+        ["По дням", "По неделям", "По месяцам"],
+        horizontal=True
+    )
+
+
     if COL_ETD and COL_WEIGHT:
 
-        view = st.radio(
-            "Группировка:",
-            ["По дням", "По неделям", "По месяцам"],
-            horizontal=True
-        )
-
-
         base = df[[COL_ETD, COL_WEIGHT]].dropna().copy()
-
         base = base.sort_values(COL_ETD)
 
 
-        # ===== GROUPING =====
+        # =============================
+        # GROUPING
+        # =============================
+
 
         if view == "По дням":
 
@@ -255,42 +262,67 @@ with tab1:
             )
 
             chart_df.columns = ["date", "weight"]
-
             chart_df["date"] = pd.to_datetime(chart_df["date"])
+            chart_df["label"] = chart_df["date"].dt.strftime("%d.%m")
+
 
 
         elif view == "По неделям":
 
+            base["week_start"] = base[COL_ETD].dt.to_period("W-MON").dt.start_time
+            base["week_end"] = base["week_start"] + pd.Timedelta(days=6)
+
             chart_df = (
                 base
-                .groupby(base[COL_ETD].dt.to_period("W"))[COL_WEIGHT]
+                .groupby(["week_start", "week_end"])[COL_WEIGHT]
                 .sum()
                 .reset_index()
             )
 
-            chart_df.columns = ["date", "weight"]
+            chart_df["date"] = chart_df["week_start"]
 
-            chart_df["date"] = chart_df["date"].dt.start_time
+            chart_df["label"] = (
+                chart_df["week_start"].dt.strftime("%d.%m")
+                + "–"
+                + chart_df["week_end"].dt.strftime("%d.%m")
+            )
+
+            chart_df = chart_df[["date", "label", COL_WEIGHT]]
+            chart_df.columns = ["date", "label", "weight"]
 
 
-        else:  # month
+
+        else:  # По месяцам
+
+            base["month"] = base[COL_ETD].dt.to_period("M")
 
             chart_df = (
                 base
-                .groupby(base[COL_ETD].dt.to_period("M"))[COL_WEIGHT]
+                .groupby("month")[COL_WEIGHT]
                 .sum()
                 .reset_index()
             )
 
-            chart_df.columns = ["date", "weight"]
+            chart_df["date"] = chart_df["month"].dt.start_time
 
-            chart_df["date"] = chart_df["date"].dt.start_time
+            chart_df["label"] = (
+                chart_df["date"].dt.month.apply(lambda x: calendar.month_name[x])
+                + " "
+                + chart_df["date"].dt.year.astype(str)
+            )
+
+            chart_df = chart_df[["date", "label", COL_WEIGHT]]
+            chart_df.columns = ["date", "label", "weight"]
 
 
         chart_df = chart_df.sort_values("date")
 
 
-        # ===== ALTAIR =====
+
+        # =============================
+        # CHART
+        # =============================
+
 
         chart = (
             alt.Chart(chart_df)
@@ -299,19 +331,25 @@ with tab1:
                 x=alt.X(
                     "date:T",
                     title="Дата",
-                    axis=alt.Axis(format="%d.%m")
+                    axis=alt.Axis(
+                        labelAngle=-45,
+                        format="%d.%m"
+                    )
                 ),
+
                 y=alt.Y(
                     "weight:Q",
                     title="Вес (кг)"
                 ),
+
                 tooltip=[
-                    alt.Tooltip("date:T", title="Дата", format="%d.%m.%Y"),
+                    alt.Tooltip("label:N", title="Период"),
                     alt.Tooltip("weight:Q", title="Вес (кг)")
                 ]
             )
             .properties(height=420)
         )
+
 
         st.altair_chart(chart, use_container_width=True)
 
@@ -395,3 +433,4 @@ st.download_button(
     "china_logistics_2026_dashboard.csv",
     "text/csv"
 )
+
