@@ -6,7 +6,7 @@ import pandas as pd
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/export?format=csv&gid=1730191747"
 
-SLA_LIMIT = 1  # допустимая задержка в днях
+SLA_LIMIT = 1  # допустимая задержка (дни)
 
 
 # ================= LOAD =================
@@ -16,7 +16,7 @@ def load_data():
 
     df = pd.read_csv(SHEET_URL, header=1)
 
-    # Данные с 863 строки
+    # Берём данные с 863 строки
     df = df.iloc[862:].copy()
 
     return df
@@ -43,10 +43,12 @@ if df.columns[0].startswith("Unnamed"):
 
 
 def find_col(keys):
+
     for col in df.columns:
         for k in keys:
             if k.lower() in col.lower():
                 return col
+
     return None
 
 
@@ -224,19 +226,63 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
 
-    st.subheader("✈️ Вылеты по партиям")
+    st.subheader("✈️ Вылеты")
 
     if COL_ETD and COL_WEIGHT:
 
-        chart = df[[COL_ETD, COL_WEIGHT]].dropna()
+        view = st.radio(
+            "Группировка:",
+            ["По дням", "По неделям", "По месяцам"],
+            horizontal=True
+        )
 
-        chart = chart.sort_values(COL_ETD)
 
-        chart["Date"] = chart[COL_ETD].dt.strftime("%d.%m")
+        base = df[[COL_ETD, COL_WEIGHT]].dropna().copy()
 
-        chart = chart.set_index("Date")
+        base = base.sort_values(COL_ETD)
 
-        st.bar_chart(chart[COL_WEIGHT])
+
+        # ===== DAY =====
+        if view == "По дням":
+
+            chart = (
+                base
+                .groupby(base[COL_ETD].dt.date)[COL_WEIGHT]
+                .sum()
+            )
+
+            chart.index = pd.to_datetime(chart.index)
+
+            chart = chart.sort_index()
+
+            chart.index = chart.index.strftime("%d.%m")
+
+
+        # ===== WEEK =====
+        elif view == "По неделям":
+
+            chart = (
+                base
+                .groupby(base[COL_ETD].dt.to_period("W"))[COL_WEIGHT]
+                .sum()
+            )
+
+            chart.index = chart.index.astype(str)
+
+
+        # ===== MONTH =====
+        else:
+
+            chart = (
+                base
+                .groupby(base[COL_ETD].dt.to_period("M"))[COL_WEIGHT]
+                .sum()
+            )
+
+            chart.index = chart.index.astype(str)
+
+
+        st.bar_chart(chart)
 
 
 # ================= TAB 2 =================
@@ -254,6 +300,7 @@ with tab2:
 
         table["AWB"] = df[COL_AWB]
         table["Flight"] = df[COL_FLIGHT]
+
         table["ETD"] = ETD_FMT
         table["ATD"] = ATD_FMT
         table["ETA"] = ETA_FMT
@@ -264,9 +311,11 @@ with tab2:
 
         table["Comment"] = df[COL_COMMENT]
 
+
         table = table.loc[delay.index]
 
         table = table.reset_index(drop=True)
+
 
         st.dataframe(table, use_container_width=True)
 
@@ -312,6 +361,6 @@ with tab3:
 st.download_button(
     "⬇️ Скачать отчёт",
     df.to_csv(index=False),
-    "china_logistics_2026_final.csv",
+    "china_logistics_2026_dashboard.csv",
     "text/csv"
 )
