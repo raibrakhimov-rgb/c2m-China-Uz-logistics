@@ -13,7 +13,8 @@ st.set_page_config(
     layout="wide"
 )
 
-SHEET_URL = "PASTE_YOUR_XLSX_EXPORT_LINK_HERE"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA/export?format=xlsx"
+
 
 
 # ================= LOAD DATA =================
@@ -261,3 +262,4 @@ with tab2:
 with tab3:
 
     st.dataframe(df, use_container_width=True)
+
