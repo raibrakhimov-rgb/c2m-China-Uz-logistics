@@ -6,7 +6,7 @@ import plotly.express as px
 import numpy as np
 
 # ========================================
-# НАСТРОЙКА СТРАНИЦЫ
+# НАСТРОЙКА
 # ========================================
 
 st.set_page_config(
@@ -25,9 +25,9 @@ html, body, [class*="css"] {
     font-family: Arial;
 }
 
-.kpi {
-    background-color:#f8fafc;
-    padding:20px;
+.metric-box {
+    background:#f1f5f9;
+    padding:15px;
     border-radius:10px;
 }
 
@@ -53,17 +53,19 @@ def load_data():
     r = requests.get(URL)
     df = pd.read_excel(BytesIO(r.content), header=1)
 
-    # удалить пустые колонки
+    # удалить unnamed колонки
     df = df.loc[:, ~df.columns.astype(str).str.contains("Unnamed")]
 
     df.columns = df.columns.str.strip()
 
-    # оставить только 2026+
-    df["Outbound date"] = pd.to_datetime(df["Outbound date"], errors="coerce")
+    # безопасная конвертация дат
+    for col in ["Outbound date","ETD","ETA","ATD","ATA"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
 
+    # только 2026+
     df = df[df["Outbound date"] >= "2026-01-01"]
 
-    # удалить строки без веса
     df["Outbound weight (kg)"] = pd.to_numeric(
         df["Outbound weight (kg)"],
         errors="coerce"
@@ -76,34 +78,29 @@ def load_data():
 df = load_data()
 
 # ========================================
-# KPI (ПРАВИЛЬНЫЕ)
+# KPI
 # ========================================
 
-valid_df = df[
-    df["Flight No.:"].notna() &
-    df["Outbound weight (kg)"].notna()
-].copy()
+kpi_df = df.copy()
 
-valid_df["ATD"] = pd.to_datetime(valid_df["ATD"], errors="coerce")
-valid_df["ATA"] = pd.to_datetime(valid_df["ATA"], errors="coerce")
-
-valid_df["Transit"] = (
-    valid_df["ATA"] - valid_df["ATD"]
+kpi_df["Transit"] = (
+    kpi_df["ATA"] - kpi_df["ATD"]
 ).dt.days
 
-valid_df.loc[
-    (valid_df["Transit"] < 0) |
-    (valid_df["Transit"] > 15),
+# убрать нереальные значения
+kpi_df.loc[
+    (kpi_df["Transit"] < 0) |
+    (kpi_df["Transit"] > 15),
     "Transit"
 ] = np.nan
 
-total_weight = int(valid_df["Outbound weight (kg)"].sum())
+total_weight = int(kpi_df["Outbound weight (kg)"].sum())
 
-total_flights = valid_df.shape[0]
+total_flights = len(kpi_df)
 
-avg_weight = int(valid_df["Outbound weight (kg)"].mean())
+avg_weight = int(kpi_df["Outbound weight (kg)"].mean())
 
-avg_transit = int(valid_df["Transit"].mean())
+avg_transit = int(kpi_df["Transit"].mean())
 
 # ========================================
 # HEADER
@@ -119,21 +116,6 @@ c3.metric("Средний вес", f"{avg_weight} кг")
 c4.metric("Средний transit time", f"{avg_transit} дней")
 
 st.divider()
-
-# ========================================
-# ФИЛЬТР
-# ========================================
-
-projects = ["Все"] + sorted(df["Проект"].dropna().unique())
-
-project = st.radio(
-    "Проект",
-    projects,
-    horizontal=True
-)
-
-if project != "Все":
-    df = df[df["Проект"] == project]
 
 # ========================================
 # ГРАФИК
@@ -175,7 +157,6 @@ elif period == "По месяцам":
 
     chart_df["month"] = chart_df["month"].astype(str)
 
-# plotly chart
 fig = px.bar(
     chart_df,
     x=chart_df.columns[0],
@@ -185,15 +166,10 @@ fig = px.bar(
 
 fig.update_traces(
     textposition="inside",
-    textfont_size=14,
     textangle=0
 )
 
-fig.update_layout(
-    height=500,
-    xaxis_title="Дата",
-    yaxis_title="Вес (кг)"
-)
+fig.update_layout(height=500)
 
 st.plotly_chart(fig, use_container_width=True)
 
@@ -214,25 +190,23 @@ with tab1:
 
     table = df.copy()
 
-    table["Outbound date"] = table["Outbound date"].dt.date
+    # безопасная дата конвертация
+    for col in ["Outbound date","ETD","ETA","ATD","ATA"]:
+        table[col] = pd.to_datetime(
+            table[col],
+            errors="coerce"
+        ).dt.date
 
-    table["ATD"] = pd.to_datetime(table["ATD"]).dt.date
-    table["ETA"] = pd.to_datetime(table["ETA"]).dt.date
-    table["ETD"] = pd.to_datetime(table["ETD"]).dt.date
-    table["ATA"] = pd.to_datetime(table["ATA"]).dt.date
+    if "ATA_ext" in table.columns:
+        table = table.rename(
+            columns={"ATA_ext":"ATA_time"}
+        )
 
-    table = table.rename(columns={
-        "ATA_ext":"ATA_time"
-    })
-
-    table.insert(0,"№", range(1,len(table)+1))
-
-    search = st.text_input("Поиск")
-
-    if search:
-        table = table.astype(str).apply(
-            lambda x: x.str.contains(search, case=False)
-        ).any(axis=1)
+    table.insert(
+        0,
+        "№",
+        range(1,len(table)+1)
+    )
 
     st.dataframe(
         table,
@@ -260,6 +234,8 @@ with tab2:
 
             cartons = g["Outbound carton"].tolist()
 
+            ata = g["ATA"].dt.date.astype(str).tolist()
+
             rows.append({
 
                 "AWB":awb,
@@ -270,16 +246,17 @@ with tab2:
 
                 "Раздельные коробки":", ".join(map(str,cartons)),
 
-                "ATA (при дроблении)":
-                ", ".join(
-                    g["ATA"].astype(str)
-                )
+                "ATA (при дроблении)":", ".join(ata)
 
             })
 
         split_table=pd.DataFrame(rows)
 
-        split_table.insert(0,"№", range(1,len(split_table)+1))
+        split_table.insert(
+            0,
+            "№",
+            range(1,len(split_table)+1)
+        )
 
         st.dataframe(
             split_table,
