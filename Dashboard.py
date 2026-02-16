@@ -2,51 +2,52 @@ import streamlit as st
 import pandas as pd
 import requests
 from io import BytesIO
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 
-# =====================================
-# PAGE CONFIG
-# =====================================
+
+# ================= CONFIG =================
 
 st.set_page_config(
     page_title="China → Uzbekistan Logistics",
     layout="wide"
 )
 
-# =====================================
-# STYLE
-# =====================================
-
 st.markdown("""
 <style>
-
-html, body, [data-testid="stApp"] {
-    background-color: #f4f6fa;
+body {
+    background-color: #f8fafc;
 }
 
 .block-container {
-    padding-top: 20px;
+    padding-top: 1rem;
 }
 
-.kpi-card {
+.metric-card {
     background: white;
     padding: 20px;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
+thead tr th {
+    position: sticky;
+    top: 0;
+    background-color: #0f172a !important;
+    color: white !important;
+    z-index: 100;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================
-# LOAD DATA
-# =====================================
+
+# ================= GOOGLE SHEET =================
 
 SHEET_ID = "1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA"
 GID = "1730191747"
 
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx&gid={GID}"
+
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -62,8 +63,6 @@ def load_data():
 
     df = df.iloc[866:].reset_index(drop=True)
 
-    df = df.loc[:, ~df.columns.astype(str).str.contains("^Unnamed")]
-
     df.columns = df.columns.astype(str).str.strip()
 
     return df
@@ -71,223 +70,234 @@ def load_data():
 
 df = load_data()
 
-# =====================================
-# FIND COLUMNS
-# =====================================
 
-def find_col(keys):
+# ================= FIND COLS =================
 
+def find_col(names):
     for col in df.columns:
-        name = col.lower()
-        for k in keys:
-            if k in name:
+        for n in names:
+            if n.lower() in col.lower():
                 return col
     return None
 
 
 COL_WEIGHT = find_col(["weight"])
+COL_CARTON = find_col(["carton"])
 COL_DATE = find_col(["outbound date"])
-COL_PROJECT = find_col(["project", "проект"])
+COL_AWB = find_col(["awb"])
+COL_PROJECT = find_col(["project"])
+COL_ETD = find_col(["etd"])
+COL_ETA = find_col(["eta"])
 COL_ATD = find_col(["atd"])
 COL_ATA = find_col(["ata"])
-COL_AWB = find_col(["awb"])
 COL_SPLIT = find_col(["дроб"])
+COL_FLIGHT = find_col(["flight"])
+COL_VIA = find_col(["via"])
 
-# types
+
+# ================= CLEAN =================
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
+df[COL_CARTON] = pd.to_numeric(df[COL_CARTON], errors="coerce")
 
-df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors="coerce")
+for c in [COL_DATE, COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
+    if c:
+        df[c] = pd.to_datetime(df[c], errors="coerce")
 
-if COL_ATD:
-    df[COL_ATD] = pd.to_datetime(df[COL_ATD], errors="coerce")
 
-if COL_ATA:
-    df[COL_ATA] = pd.to_datetime(df[COL_ATA], errors="coerce")
+df = df.dropna(subset=[COL_DATE, COL_WEIGHT])
 
-df = df.dropna(subset=[COL_DATE])
 
-# =====================================
-# TITLE
-# =====================================
+# ================= TITLE =================
 
 st.title("✈️ China → Uzbekistan Logistics Dashboard")
 
-# =====================================
-# KPI BLOCK
-# =====================================
 
-total_weight = int(df[COL_WEIGHT].sum())
+# ================= KPI =================
+
+total_weight = df[COL_WEIGHT].sum()
 
 total_flights = df[COL_AWB].nunique()
 
-avg_weight = int(df[COL_WEIGHT].mean())
+avg_weight = df.groupby(COL_AWB)[COL_WEIGHT].sum().mean()
 
-if COL_ATD and COL_ATA:
-    transit = (df[COL_ATA] - df[COL_ATD]).dt.days
-    avg_transit = round(transit.mean(),1)
+if COL_ETD and COL_ATA:
+    transit = (df[COL_ATA] - df[COL_ETD]).dt.days
+    avg_transit = transit.mean()
 else:
-    avg_transit = 0
+    avg_transit = None
 
-c1,c2,c3,c4 = st.columns(4)
 
-c1.markdown(f"""
-<div class="kpi-card">
-<h4>Общий вес</h4>
-<h2>{total_weight:,} кг</h2>
-</div>
-""", unsafe_allow_html=True)
+col1, col2, col3, col4 = st.columns(4)
 
-c2.markdown(f"""
-<div class="kpi-card">
-<h4>Количество рейсов</h4>
-<h2>{total_flights}</h2>
-</div>
-""", unsafe_allow_html=True)
+col1.metric("Общий вес (кг)", f"{total_weight:,.0f}")
+col2.metric("Количество рейсов", f"{total_flights}")
+col3.metric("Средний вес рейса", f"{avg_weight:,.0f}")
 
-c3.markdown(f"""
-<div class="kpi-card">
-<h4>Средний вес</h4>
-<h2>{avg_weight} кг</h2>
-</div>
-""", unsafe_allow_html=True)
+if avg_transit:
+    col4.metric("Средний transit time (дней)", f"{avg_transit:.1f}")
 
-c4.markdown(f"""
-<div class="kpi-card">
-<h4>Средний transit time</h4>
-<h2>{avg_transit} дней</h2>
-</div>
-""", unsafe_allow_html=True)
 
-st.write("")
-
-# =====================================
-# FILTER
-# =====================================
+# ================= FILTER =================
 
 projects = ["Все"] + sorted(df[COL_PROJECT].dropna().unique())
 
-project = st.radio(
-    "Проект",
-    projects,
-    horizontal=True
-)
+project = st.radio("Проект", projects, horizontal=True)
 
 if project != "Все":
-    df = df[df[COL_PROJECT]==project]
+    df = df[df[COL_PROJECT] == project]
+
+
+# ================= PERIOD =================
 
 period = st.radio(
     "Период",
-    ["По дням","По неделям","По месяцам"],
+    ["По дням", "По неделям", "По месяцам"],
     horizontal=True
 )
 
-# =====================================
-# GROUP DATA
-# =====================================
 
-if period=="По дням":
+# ================= CHART =================
 
-    grouped = df.groupby(
-        df[COL_DATE].dt.date
-    )[COL_WEIGHT].sum().reset_index()
+chart_df = df.copy()
 
-    grouped["date"] = pd.to_datetime(grouped[COL_DATE])
+if period == "По дням":
 
-    grouped = grouped.sort_values("date")
+    grouped = (
+        chart_df
+        .groupby(chart_df[COL_DATE].dt.date)[COL_WEIGHT]
+        .sum()
+        .reset_index()
+        .sort_values(COL_DATE)
+    )
 
-    grouped = grouped.tail(30)
+    fig = go.Figure()
 
-    x = grouped["date"]
+    fig.add_trace(go.Bar(
+        x=grouped[COL_DATE],
+        y=grouped[COL_WEIGHT],
+        name="Вес"
+    ))
 
-elif period=="По неделям":
+    fig.add_trace(go.Scatter(
+        x=grouped[COL_DATE],
+        y=grouped[COL_WEIGHT],
+        mode="lines+markers",
+        name="Trend"
+    ))
 
-    grouped = df.groupby(
-        df[COL_DATE].dt.to_period("W")
-    )[COL_WEIGHT].sum().reset_index()
+elif period == "По неделям":
 
-    grouped["date"] = grouped[COL_DATE].dt.start_time
+    grouped = (
+        chart_df
+        .groupby(chart_df[COL_DATE].dt.to_period("W"))[COL_WEIGHT]
+        .sum()
+        .reset_index()
+    )
 
-    grouped = grouped.sort_values("date")
+    grouped[COL_DATE] = grouped[COL_DATE].astype(str)
 
-    x = grouped["date"]
+    fig = px.bar(grouped, x=COL_DATE, y=COL_WEIGHT)
 
 else:
 
-    grouped = df.groupby(
-        df[COL_DATE].dt.to_period("M")
-    )[COL_WEIGHT].sum().reset_index()
+    grouped = (
+        chart_df
+        .groupby(chart_df[COL_DATE].dt.to_period("M"))[COL_WEIGHT]
+        .sum()
+        .reset_index()
+    )
 
-    grouped["date"] = grouped[COL_DATE].dt.start_time
+    grouped[COL_DATE] = grouped[COL_DATE].astype(str)
 
-    grouped = grouped.sort_values("date")
+    fig = px.bar(grouped, x=COL_DATE, y=COL_WEIGHT)
 
-    x = grouped["date"]
 
-# =====================================
-# CHART
-# =====================================
-
-fig = go.Figure()
-
-fig.add_bar(
-    x=x,
-    y=grouped[COL_WEIGHT],
-    name="Weight",
-)
-
-fig.add_scatter(
-    x=x,
-    y=grouped[COL_WEIGHT],
-    mode="lines+markers",
-    name="Trend"
-)
-
-fig.update_layout(
-    height=500,
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    xaxis=dict(
-        rangeslider=dict(visible=True),
-        type="date"
-    ),
-    hovermode="x unified"
-)
+fig.update_layout(height=500)
 
 st.plotly_chart(fig, use_container_width=True)
 
-# =====================================
-# SPLIT PARTIES
-# =====================================
 
-st.subheader("📦 Дробленные партии")
+# ================= TABS =================
 
-if COL_SPLIT:
+tab1, tab2 = st.tabs([
+    "📋 Список партий",
+    "📦 Дробленные партии"
+])
 
-    split_df = df[df[COL_SPLIT].astype(str).str.lower()=="да"]
 
-    rows=[]
+# ================= СПИСОК ПАРТИЙ =================
 
-    for awb,g in split_df.groupby(COL_AWB):
+with tab1:
 
-        if len(g)<2:
-            continue
+    table = df.copy()
 
-        cartons=g["Outbound carton"].tolist()
+    table = table.reset_index(drop=True)
 
-        rows.append({
-            "AWB":awb,
-            "Flights":len(g),
-            "Cartons total":sum(cartons),
-            "Cartons split":",".join(map(str,cartons))
-        })
+    if "№" in table.columns:
+        table = table.drop(columns=["№"])
 
-    split_table=pd.DataFrame(rows)
+    table.insert(0, "№", table.index + 1)
 
-    split_table.insert(0,"№",split_table.index+1)
+    for c in [COL_DATE, COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
+        if c:
+            table[c] = table[c].dt.date
 
-    st.dataframe(split_table,use_container_width=True)
 
-else:
+    search = st.text_input("Поиск")
 
-    st.info("Нет дробленных партий")
+    if search:
+        table = table[
+            table.astype(str)
+            .apply(lambda x: x.str.contains(search, case=False))
+            .any(axis=1)
+        ]
+
+
+    project_filter = st.selectbox(
+        "Фильтр проект",
+        ["Все"] + sorted(table[COL_PROJECT].dropna().unique())
+    )
+
+    if project_filter != "Все":
+        table = table[table[COL_PROJECT] == project_filter]
+
+
+    st.dataframe(table, use_container_width=True, height=700)
+
+
+# ================= SPLIT =================
+
+with tab2:
+
+    if COL_SPLIT:
+
+        split_df = df[df[COL_SPLIT].astype(str).str.lower() == "да"]
+
+        rows = []
+
+        for awb, g in split_df.groupby(COL_AWB):
+
+            cartons = g[COL_CARTON].tolist()
+
+            rows.append({
+
+                "AWB": awb,
+                "Flights": len(g),
+                "Total cartons": sum(cartons),
+                "Parts": ", ".join(map(str, cartons)),
+                "ATA (при дроблении)": ", ".join(
+                    g[COL_ATA].dt.date.astype(str)
+                )
+
+            })
+
+        split_table = pd.DataFrame(rows)
+
+        split_table.insert(0, "№", split_table.index + 1)
+
+        st.dataframe(split_table, use_container_width=True)
+
+    else:
+
+        st.info("Нет дробленных партий")
