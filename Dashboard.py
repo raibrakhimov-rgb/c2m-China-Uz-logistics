@@ -53,11 +53,11 @@ def find_col(names, columns):
 
     for col in columns:
 
-        c = col.lower()
+        col_low = col.lower()
 
         for name in names:
 
-            if name in c:
+            if name in col_low:
                 return col
 
     return None
@@ -70,7 +70,10 @@ COL_AWB = find_col(["awb"], df.columns)
 COL_FLIGHT = find_col(["flight"], df.columns)
 COL_VIA = find_col(["via"], df.columns)
 COL_ATD = find_col(["atd"], df.columns)
-COL_ATA = find_col(["ata"], df.columns)
+
+# ВАЖНО: сначала ищем ATA.1
+COL_ATA = find_col(["ata.1", "ata"], df.columns)
+
 COL_SPLIT = find_col(["дроб"], df.columns)
 
 
@@ -91,8 +94,6 @@ for col in df.columns:
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
 
-df["Transit"] = (df[COL_ATA] - df[COL_ATD]).dt.days
-
 df = df.dropna(subset=[COL_DATE])
 
 
@@ -100,13 +101,19 @@ df = df.dropna(subset=[COL_DATE])
 # REMOVE UNUSED COLUMNS
 # =====================================================
 
-REMOVE = ["pod", "ata_ext", "ata.1", "комментар"]
+REMOVE_NAMES = [
+
+    "pod",
+    "ata_ext",
+    "ata.1_ext",
+    "комментар"
+]
 
 drop_cols = []
 
 for col in df.columns:
 
-    if any(x in col.lower() for x in REMOVE):
+    if any(x in col.lower() for x in REMOVE_NAMES):
 
         drop_cols.append(col)
 
@@ -120,9 +127,10 @@ df = df.drop(columns=drop_cols, errors="ignore")
 def safe_index(data):
 
     if "№" in data.columns:
+
         data = data.drop(columns=["№"])
 
-    data.insert(0, "№", range(1, len(data)+1))
+    data.insert(0, "№", range(1, len(data) + 1))
 
     return data
 
@@ -133,13 +141,16 @@ def format_dates(data):
 
         if col in data.columns:
 
-            data[col] = pd.to_datetime(data[col], errors="coerce").dt.strftime("%d-%m-%Y")
+            data[col] = pd.to_datetime(
+                data[col],
+                errors="coerce"
+            ).dt.strftime("%d-%m-%Y")
 
     return data
 
 
 # =====================================================
-# SIDEBAR
+# SIDEBAR FILTERS
 # =====================================================
 
 st.sidebar.header("Фильтры")
@@ -190,21 +201,38 @@ st.title("Свод по рейсам Китай-Узбекистан")
 
 
 # =====================================================
-# KPI
+# KPI BLOCK
 # =====================================================
+
+total_weight = int(filtered[COL_WEIGHT].sum())
+
+total_shipments = len(filtered)
+
+avg_weight = int(filtered[COL_WEIGHT].mean()) if total_shipments else 0
+
+
+# ПРАВИЛЬНЫЙ расчет transit
+
+ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
+
+atd = pd.to_datetime(filtered[COL_ATD], errors="coerce")
+
+transit = (ata - atd).dt.days
+
+transit = transit.dropna()
+
+avg_transit = int(transit.mean()) if len(transit) > 0 else 0
+
 
 c1, c2, c3, c4 = st.columns(4)
 
-c1.metric("Общий вес", f"{int(filtered[COL_WEIGHT].sum()):,} кг")
+c1.metric("Общий вес", f"{total_weight:,} кг")
 
-c2.metric("Количество партий", len(filtered))
+c2.metric("Количество партий", total_shipments)
 
-c3.metric("Средний вес", f"{int(filtered[COL_WEIGHT].mean()):,} кг")
+c3.metric("Средний вес", f"{avg_weight} кг")
 
-c4.metric(
-    "Среднее транзитное время",
-    f"{int(filtered['Transit'].mean()) if filtered['Transit'].notna().sum() else 0} дней"
-)
+c4.metric("Среднее транзитное время", f"{avg_transit} дней")
 
 
 # =====================================================
@@ -252,7 +280,10 @@ with col1:
         .reset_index()
     )
 
-    st.plotly_chart(px.bar(proj, x=COL_PROJECT, y=COL_WEIGHT, text=COL_WEIGHT), use_container_width=True)
+    st.plotly_chart(
+        px.bar(proj, x=COL_PROJECT, y=COL_WEIGHT, text=COL_WEIGHT),
+        use_container_width=True
+    )
 
 
 with col2:
@@ -265,7 +296,10 @@ with col2:
         .reset_index()
     )
 
-    st.plotly_chart(px.pie(via, names=COL_VIA, values=COL_WEIGHT), use_container_width=True)
+    st.plotly_chart(
+        px.pie(via, names=COL_VIA, values=COL_WEIGHT),
+        use_container_width=True
+    )
 
 
 # =====================================================
@@ -276,7 +310,7 @@ tab1, tab2 = st.tabs(["Список партий", "Дробленные пар�
 
 
 # =====================================================
-# TAB 1 LIST
+# TAB 1
 # =====================================================
 
 with tab1:
@@ -288,7 +322,8 @@ with tab1:
     if search:
 
         table = table[
-            table[COL_AWB].astype(str)
+            table[COL_AWB]
+            .astype(str)
             .str.contains(search, case=False, na=False)
         ]
 
@@ -310,7 +345,8 @@ with tab2:
     if COL_SPLIT:
 
         split = filtered[
-            filtered[COL_SPLIT].astype(str)
+            filtered[COL_SPLIT]
+            .astype(str)
             .str.contains("да", case=False, na=False)
         ].copy()
 
