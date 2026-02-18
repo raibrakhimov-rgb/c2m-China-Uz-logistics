@@ -53,7 +53,7 @@ def find_col(names, columns):
 
     for col in columns:
 
-        col_low = col.lower()
+        col_low = col.lower().strip()
 
         for name in names:
 
@@ -71,25 +71,42 @@ COL_FLIGHT = find_col(["flight"], df.columns)
 COL_VIA = find_col(["via"], df.columns)
 COL_ATD = find_col(["atd"], df.columns)
 
-# ВАЖНО: сначала ищем ATA.1
-COL_ATA = find_col(["ata.1", "ata"], df.columns)
+# строго колонка ATA
+COL_ATA = None
+for col in df.columns:
+    if col.strip().lower() == "ata":
+        COL_ATA = col
+        break
 
 COL_SPLIT = find_col(["дроб"], df.columns)
 
 
 # =====================================================
-# CLEAN DATA
+# CLEAN TYPES
 # =====================================================
 
 DATE_COLUMNS = []
 
 for col in df.columns:
 
-    if any(x in col.lower() for x in ["date", "etd", "atd", "eta", "ata", "хаб"]):
+    col_low = col.lower()
 
+    # только реальные даты, исключаем "дней"
+    if (
+        any(x in col_low for x in ["date", "etd", "atd", "eta", "ata"])
+        and "дней" not in col_low
+    ):
         df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
-
         DATE_COLUMNS.append(col)
+
+
+# исправляем колонки с днями
+
+for col in df.columns:
+
+    if "дней" in col.lower():
+
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
 
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
@@ -101,20 +118,20 @@ df = df.dropna(subset=[COL_DATE])
 # REMOVE UNUSED COLUMNS
 # =====================================================
 
-REMOVE_NAMES = [
+REMOVE = [
 
     "pod",
     "ata_ext",
-    "ata.1_ext",
-    "комментар"
+    "ata.1",
+    "комментар",
+    "wh_ext",
 ]
 
 drop_cols = []
 
 for col in df.columns:
 
-    if any(x in col.lower() for x in REMOVE_NAMES):
-
+    if any(x in col.lower() for x in REMOVE):
         drop_cols.append(col)
 
 df = df.drop(columns=drop_cols, errors="ignore")
@@ -127,10 +144,9 @@ df = df.drop(columns=drop_cols, errors="ignore")
 def safe_index(data):
 
     if "№" in data.columns:
-
         data = data.drop(columns=["№"])
 
-    data.insert(0, "№", range(1, len(data) + 1))
+    data.insert(0, "№", range(1, len(data)+1))
 
     return data
 
@@ -179,13 +195,9 @@ date_range = st.sidebar.date_input(
 
 filtered = df.copy()
 
-filtered = filtered[
-    filtered[COL_PROJECT].isin(projects)
-]
+filtered = filtered[filtered[COL_PROJECT].isin(projects)]
 
-filtered = filtered[
-    filtered[COL_VIA].isin(vias)
-]
+filtered = filtered[filtered[COL_VIA].isin(vias)]
 
 filtered = filtered[
     (filtered[COL_DATE] >= pd.to_datetime(date_range[0])) &
@@ -194,15 +206,10 @@ filtered = filtered[
 
 
 # =====================================================
-# HEADER
+# KPI
 # =====================================================
 
 st.title("Свод по рейсам Китай-Узбекистан")
-
-
-# =====================================================
-# KPI BLOCK
-# =====================================================
 
 total_weight = int(filtered[COL_WEIGHT].sum())
 
@@ -211,15 +218,13 @@ total_shipments = len(filtered)
 avg_weight = int(filtered[COL_WEIGHT].mean()) if total_shipments else 0
 
 
-# ПРАВИЛЬНЫЙ расчет transit
+# transit строго ATA - ATD
 
 ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
 
 atd = pd.to_datetime(filtered[COL_ATD], errors="coerce")
 
-transit = (ata - atd).dt.days
-
-transit = transit.dropna()
+transit = (ata - atd).dt.days.dropna()
 
 avg_transit = int(transit.mean()) if len(transit) > 0 else 0
 
@@ -265,44 +270,6 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # =====================================================
-# BREAKDOWN
-# =====================================================
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    st.subheader("Объём по проектам")
-
-    proj = (
-        filtered.groupby(COL_PROJECT)[COL_WEIGHT]
-        .sum()
-        .reset_index()
-    )
-
-    st.plotly_chart(
-        px.bar(proj, x=COL_PROJECT, y=COL_WEIGHT, text=COL_WEIGHT),
-        use_container_width=True
-    )
-
-
-with col2:
-
-    st.subheader("Объём по транзитным городам Китая")
-
-    via = (
-        filtered.groupby(COL_VIA)[COL_WEIGHT]
-        .sum()
-        .reset_index()
-    )
-
-    st.plotly_chart(
-        px.pie(via, names=COL_VIA, values=COL_WEIGHT),
-        use_container_width=True
-    )
-
-
-# =====================================================
 # TABS
 # =====================================================
 
@@ -322,8 +289,7 @@ with tab1:
     if search:
 
         table = table[
-            table[COL_AWB]
-            .astype(str)
+            table[COL_AWB].astype(str)
             .str.contains(search, case=False, na=False)
         ]
 
