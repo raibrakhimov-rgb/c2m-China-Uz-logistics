@@ -71,7 +71,7 @@ COL_FLIGHT = find_col(["flight"], df.columns)
 COL_VIA = find_col(["via"], df.columns)
 COL_ATD = find_col(["atd"], df.columns)
 
-# строго колонка ATA
+# строго ATA (колонка N)
 COL_ATA = None
 for col in df.columns:
     if col.strip().lower() == "ata":
@@ -91,7 +91,7 @@ for col in df.columns:
 
     col_low = col.lower()
 
-    # только реальные даты, исключаем "дней"
+    # только реальные даты
     if (
         any(x in col_low for x in ["date", "etd", "atd", "eta", "ata"])
         and "дней" not in col_low
@@ -100,13 +100,16 @@ for col in df.columns:
         DATE_COLUMNS.append(col)
 
 
-# исправляем колонки с днями
+# безопасная обработка колонок дней
 
 for col in df.columns:
 
     if "дней" in col.lower():
 
-        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        ).round(0)
 
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
@@ -119,12 +122,11 @@ df = df.dropna(subset=[COL_DATE])
 # =====================================================
 
 REMOVE = [
-
     "pod",
     "ata_ext",
     "ata.1",
     "комментар",
-    "wh_ext",
+    "wh_ext"
 ]
 
 drop_cols = []
@@ -132,6 +134,7 @@ drop_cols = []
 for col in df.columns:
 
     if any(x in col.lower() for x in REMOVE):
+
         drop_cols.append(col)
 
 df = df.drop(columns=drop_cols, errors="ignore")
@@ -166,7 +169,7 @@ def format_dates(data):
 
 
 # =====================================================
-# SIDEBAR FILTERS
+# SIDEBAR
 # =====================================================
 
 st.sidebar.header("Фильтры")
@@ -206,7 +209,7 @@ filtered = filtered[
 
 
 # =====================================================
-# KPI
+# KPI BLOCK
 # =====================================================
 
 st.title("Свод по рейсам Китай-Узбекистан")
@@ -303,7 +306,7 @@ with tab1:
 
 
 # =====================================================
-# TAB 2 SPLIT
+# TAB 2
 # =====================================================
 
 with tab2:
@@ -314,7 +317,7 @@ with tab2:
             filtered[COL_SPLIT]
             .astype(str)
             .str.contains("да", case=False, na=False)
-        ].copy()
+        ]
 
         split = split.sort_values(COL_DATE)
 
