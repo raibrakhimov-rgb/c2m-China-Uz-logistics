@@ -9,7 +9,7 @@ from io import BytesIO
 # =====================================
 
 st.set_page_config(
-    page_title="Логистика Китай → Узбекистан",
+    page_title="Свод по рейсам Китай-Узбекистан",
     layout="wide"
 )
 
@@ -33,8 +33,7 @@ def load_data():
 
     df = pd.read_excel(
         BytesIO(r.content),
-        engine="openpyxl",
-        header=0
+        engine="openpyxl"
     )
 
     df.columns = df.columns.astype(str).str.strip()
@@ -57,21 +56,21 @@ def find_col(names):
 
     for col in df.columns:
 
-        col_low = col.lower()
+        c = col.lower()
 
         for name in names:
 
-            if name in col_low:
+            if name in c:
                 return col
 
     return None
 
 
-COL_PROJECT = find_col(["проект", "project"])
-COL_WEIGHT = find_col(["outbound weight", "weight"])
-COL_DATE = find_col(["outbound date", "date"])
-COL_CARTON = find_col(["outbound carton", "carton"])
-COL_AWB = find_col(["awb", "booking"])
+COL_PROJECT = find_col(["проект"])
+COL_WEIGHT = find_col(["weight"])
+COL_DATE = find_col(["outbound date"])
+COL_CARTON = find_col(["carton"])
+COL_AWB = find_col(["awb"])
 COL_FLIGHT = find_col(["flight"])
 COL_VIA = find_col(["via"])
 COL_ETD = find_col(["etd"])
@@ -81,22 +80,9 @@ COL_ATA = find_col(["ata.1"])
 COL_SPLIT = find_col(["дроб"])
 COL_REMARKS = find_col(["remark"])
 
-COL_HUB_DATE = find_col(["поступление на склад хаб"])
-COL_DAYS_TAS = find_col(["дней до прибытия из swe до терминала tas"])
-COL_DAYS_HUB = find_col(["дней до прибытия из swe до хаб"])
-
-
-CRITICAL = [
-    COL_PROJECT,
-    COL_WEIGHT,
-    COL_DATE
-]
-
-if any(x is None for x in CRITICAL):
-
-    st.error("Не найдены критические колонки")
-    st.write(df.columns.tolist())
-    st.stop()
+COL_HUB_DATE = find_col(["хаб"])
+COL_DAYS_TAS = find_col(["терминала tas"])
+COL_DAYS_HUB = find_col(["до хаб"])
 
 
 # =====================================
@@ -116,72 +102,39 @@ DATE_COLS = [
 
 for c in DATE_COLS:
 
-    if c and c in df.columns:
+    if c:
 
         df[c] = pd.to_datetime(
             df[c],
             errors="coerce",
             dayfirst=True
-        ).dt.date
+        )
 
 
 df = df.dropna(subset=[COL_DATE])
 
 
 # =====================================
-# REMOVE UNUSED COLUMNS
+# FORMAT DATE FUNCTION
 # =====================================
 
-DROP_NAMES = [
-    "pod",
-    "wh_ext",
-    "ata_ext",
-    "поступление на склад"
-]
+def fmt_date(series):
 
-DROP_COLS = []
-
-for col in df.columns:
-
-    col_low = col.lower()
-
-    for name in DROP_NAMES:
-
-        if name in col_low and "хаб" not in col_low:
-
-            DROP_COLS.append(col)
-
-df = df.drop(columns=DROP_COLS, errors="ignore")
-
-
-# =====================================
-# ROUND TRANSIT DAYS
-# =====================================
-
-for c in [COL_DAYS_TAS, COL_DAYS_HUB]:
-
-    if c and c in df.columns:
-
-        df[c] = pd.to_numeric(
-            df[c],
-            errors="coerce"
-        ).round(0).astype("Int64")
+    return series.dt.strftime("%d-%m-%Y")
 
 
 # =====================================
 # HEADER
 # =====================================
 
-st.title("Логистика Китай → Узбекистан")
+st.title("Свод по рейсам Китай-Узбекистан")
 
 
 # =====================================
 # FILTER PROJECT
 # =====================================
 
-projects = ["Все"] + sorted(
-    df[COL_PROJECT].dropna().unique().tolist()
-)
+projects = ["Все"] + sorted(df[COL_PROJECT].dropna().unique())
 
 project = st.radio(
     "Проект:",
@@ -193,9 +146,7 @@ filtered = df.copy()
 
 if project != "Все":
 
-    filtered = filtered[
-        filtered[COL_PROJECT] == project
-    ]
+    filtered = filtered[filtered[COL_PROJECT] == project]
 
 
 # =====================================
@@ -206,29 +157,37 @@ total_weight = int(filtered[COL_WEIGHT].sum())
 
 total_flights = len(filtered)
 
-avg_weight = int(filtered[COL_WEIGHT].mean()) if total_flights > 0 else 0
+avg_weight = int(filtered[COL_WEIGHT].mean())
 
 
-transit = None
+# transit = ATA - ATD (correct logic)
 
-if COL_ETD and COL_ATA:
+transit_series = (
 
-    etd = pd.to_datetime(filtered[COL_ETD], errors="coerce")
+    filtered[COL_ATA] - filtered[COL_ATD]
 
-    ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
-
-    transit = (ata - etd).dt.days.dropna()
+).dt.days
 
 
-avg_transit = int(transit.mean()) if transit is not None and len(transit) > 0 else 0
+avg_transit = int(transit_series.mean())
 
 
 c1, c2, c3, c4 = st.columns(4)
 
 c1.metric("Общий вес", f"{total_weight:,} кг")
+
 c2.metric("Количество рейсов", total_flights)
+
 c3.metric("Средний вес", f"{avg_weight} кг")
-c4.metric("Средний transit time", f"{avg_transit} дней")
+
+c4.metric("Среднее транзитное время", f"{avg_transit} дней")
+
+
+# =====================================
+# CHART TITLE
+# =====================================
+
+st.subheader("Перевезенные партии, кг")
 
 
 # =====================================
@@ -244,36 +203,30 @@ period = st.radio(
 
 chart = filtered.copy()
 
-chart[COL_DATE] = pd.to_datetime(chart[COL_DATE], errors="coerce")
-
 if period == "По дням":
 
-    grouped = (
-        chart.groupby(chart[COL_DATE].dt.date)[COL_WEIGHT]
-        .sum()
-        .reset_index()
-    )
+    chart["grp"] = chart[COL_DATE].dt.strftime("%d-%m-%Y")
 
 elif period == "По неделям":
 
-    grouped = (
-        chart.groupby(chart[COL_DATE].dt.to_period("W"))[COL_WEIGHT]
-        .sum()
-        .reset_index()
-    )
+    chart["grp"] = chart[COL_DATE].dt.to_period("W").astype(str)
 
 else:
 
-    grouped = (
-        chart.groupby(chart[COL_DATE].dt.to_period("M"))[COL_WEIGHT]
-        .sum()
-        .reset_index()
-    )
+    chart["grp"] = chart[COL_DATE].dt.strftime("%m-%Y")
 
+
+grouped = (
+
+    chart.groupby("grp")[COL_WEIGHT]
+
+    .sum()
+
+    .reset_index()
+
+)
 
 grouped.columns = ["Дата", "Вес"]
-
-grouped["Дата"] = grouped["Дата"].astype(str)
 
 
 # =====================================
@@ -286,23 +239,33 @@ fig = px.bar(
 
     x="Дата",
     y="Вес",
-
     text="Вес"
 )
 
 fig.update_traces(
 
-    textposition="inside"
+    textposition="outside",
+
+    textangle=0,
+
+    textfont_size=12
 )
 
 fig.update_layout(
 
-    height=500
+    height=500,
+
+    xaxis_tickangle=-45,
+
+    uniformtext_minsize=10,
+
+    uniformtext_mode="hide"
 )
 
 st.plotly_chart(
 
     fig,
+
     use_container_width=True
 )
 
@@ -311,130 +274,134 @@ st.plotly_chart(
 # TABS
 # =====================================
 
-tab1, tab2 = st.tabs(
+tab1, tab2 = st.tabs(["Список партий", "Дробленные партии"])
 
-    ["Список партий", "Дробленные партии"]
+
+# =====================================
+# SEARCH BOX
+# =====================================
+
+search_awb = st.text_input(
+
+    "Поиск по AWB номеру:",
+    ""
 )
 
 
 # =====================================
-# FINAL COLUMN ORDER
+# TABLE FORMATTER
 # =====================================
 
-FINAL_COLUMNS = [
+def prepare_table(data):
 
-    "№",
+    table = data.copy()
 
-    COL_PROJECT,
-    COL_CARTON,
-    COL_WEIGHT,
-    COL_DATE,
-    COL_AWB,
-    COL_FLIGHT,
-    COL_VIA,
-    COL_ETD,
-    COL_ATD,
-    COL_ETA,
-    COL_ATA,
-    COL_HUB_DATE,
-    COL_DAYS_TAS,
-    COL_DAYS_HUB,
-    COL_REMARKS
-]
+    if search_awb:
 
+        table = table[
+            table[COL_AWB].astype(str)
+            .str.contains(search_awb, case=False, na=False)
+        ]
 
-RENAME_MAP = {
+    table.insert(0, "№", range(1, len(table) + 1))
 
-    COL_PROJECT: "Проект",
-    COL_CARTON: "Outbound carton",
-    COL_WEIGHT: "Outbound weight",
-    COL_DATE: "Outbound date",
-    COL_AWB: "Booking/AWB NO",
-    COL_FLIGHT: "Flight No.",
-    COL_VIA: "VIA",
-    COL_ETD: "ETD",
-    COL_ATD: "ATD",
-    COL_ETA: "ETA",
-    COL_ATA: "ATA",
-    COL_HUB_DATE: "Поступление на склад ХАБ",
-    COL_DAYS_TAS: "Дней до прибытия из SWE до Терминала TAS",
-    COL_DAYS_HUB: "Дней до прибытия из SWE до ХАБа",
-    COL_REMARKS: "Remarks"
-}
+    for c in DATE_COLS:
+
+        if c in table.columns:
+
+            table[c] = fmt_date(table[c])
+
+    cols = [
+
+        "№",
+
+        COL_PROJECT,
+        COL_CARTON,
+        COL_WEIGHT,
+        COL_DATE,
+        COL_AWB,
+        COL_FLIGHT,
+        COL_VIA,
+        COL_ETD,
+        COL_ATD,
+        COL_ETA,
+        COL_ATA,
+        COL_HUB_DATE,
+        COL_DAYS_TAS,
+        COL_DAYS_HUB,
+        COL_REMARKS
+
+    ]
+
+    cols = [c for c in cols if c in table.columns]
+
+    table = table[cols]
+
+    rename = {
+
+        COL_PROJECT: "Проект",
+        COL_CARTON: "Outbound carton",
+        COL_WEIGHT: "Outbound weight",
+        COL_DATE: "Outbound date",
+        COL_AWB: "Booking/AWB NO",
+        COL_FLIGHT: "Flight No.",
+        COL_VIA: "VIA",
+        COL_ETD: "ETD",
+        COL_ATD: "ATD",
+        COL_ETA: "ETA",
+        COL_ATA: "ATA",
+        COL_HUB_DATE: "Поступление на склад ХАБ",
+        COL_DAYS_TAS: "Дней до прибытия до TAS",
+        COL_DAYS_HUB: "Дней до прибытия до ХАБ",
+        COL_REMARKS: "Remarks"
+    }
+
+    return table.rename(columns=rename)
 
 
 # =====================================
-# SHIPMENTS TABLE
+# TAB1
 # =====================================
 
 with tab1:
 
-    table = filtered.copy()
-
-    if "№" in table.columns:
-
-        table = table.drop(columns=["№"])
-
-    table.insert(
-
-        0,
-        "№",
-        range(1, len(table) + 1)
-    )
-
-    cols = [c for c in FINAL_COLUMNS if c in table.columns]
-
-    table = table[cols]
-
-    table = table.rename(columns=RENAME_MAP)
+    table = prepare_table(filtered)
 
     st.dataframe(
 
         table,
+
         use_container_width=True,
+
         height=700
     )
 
 
 # =====================================
-# SPLIT SHIPMENTS
+# TAB2
 # =====================================
 
 with tab2:
 
-    if COL_SPLIT is None:
-
-        st.info("Нет колонки дробления")
-
-    else:
+    if COL_SPLIT:
 
         split = filtered[
             filtered[COL_SPLIT]
             .astype(str)
-            .str.lower()
-            .str.contains("да")
+            .str.contains("да", case=False, na=False)
         ]
 
-        if "№" in split.columns:
-
-            split = split.drop(columns=["№"])
-
-        split.insert(
-
-            0,
-            "№",
-            range(1, len(split) + 1)
-        )
-
-        cols = [c for c in FINAL_COLUMNS if c in split.columns]
-
-        split = split[cols]
-
-        split = split.rename(columns=RENAME_MAP)
+        table = prepare_table(split)
 
         st.dataframe(
 
-            split,
+            table,
+
             use_container_width=True,
+
             height=700
         )
+
+    else:
+
+        st.info("Нет дробленных партий")
