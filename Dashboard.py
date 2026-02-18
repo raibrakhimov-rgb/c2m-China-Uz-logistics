@@ -3,26 +3,26 @@ import pandas as pd
 import requests
 from io import BytesIO
 import plotly.express as px
+from datetime import datetime
 
-# ============================================
+# =========================
 # CONFIG
-# ============================================
+# =========================
 
 st.set_page_config(
     page_title="Логистика Китай → Узбекистан",
     layout="wide"
 )
 
-st.title("✈️ Сводная по вылетам Китай → Узбекистан")
-
 SHEET_ID = "1HeNTJS3lCHr37K3TmgeCzQwt2i9n5unA"
 GID = "1730191747"
 
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx&gid={GID}"
 
-# ============================================
+
+# =========================
 # LOAD DATA
-# ============================================
+# =========================
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -36,245 +36,205 @@ def load_data():
         header=1
     )
 
-    # удалить unnamed
-    df = df.loc[:, ~df.columns.astype(str).str.contains("^Unnamed")]
+    df = df.dropna(how="all")
 
-    # очистить названия
-    df.columns = (
-        df.columns
-        .astype(str)
-        .str.strip()
-        .str.replace("\n", " ")
-        .str.replace("  ", " ")
-    )
+    df.columns = df.columns.astype(str).str.strip()
 
-    # данные с 2026
-    df = df.iloc[866:].copy()
-
-    df.reset_index(drop=True, inplace=True)
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
 
     return df
 
 
 df = load_data()
 
-# ============================================
-# AUTO COLUMN DETECT
-# ============================================
 
-def find_column(possible_names):
+# =========================
+# FIND COLUMN SAFE
+# =========================
 
-    for name in df.columns:
+def find_column(possible):
 
-        for p in possible_names:
+    for col in df.columns:
 
-            if p.lower() in name.lower():
+        name = col.lower()
 
-                return name
+        for p in possible:
+            if p in name:
+                return col
 
     return None
 
 
-COL_WEIGHT = find_column([
-    "weight"
-])
+COL_DATE = find_column(["outbound date", "дата"])
+COL_WEIGHT = find_column(["weight", "вес"])
+COL_PROJECT = find_column(["project", "проект"])
+COL_AWB = find_column(["awb"])
+COL_ETD = find_column(["etd"])
+COL_ATA = find_column(["ata"])
+COL_SPLIT = find_column(["дроб", "split"])
 
-COL_CARTON = find_column([
-    "carton"
-])
 
-COL_DATE = find_column([
-    "Outbound date"
-])
+# =========================
+# VALIDATE
+# =========================
 
-COL_PROJECT = find_column([
-    "Проект"
-])
+if COL_DATE is None or COL_WEIGHT is None:
 
-COL_AWB = find_column([
-    "AWB"
-])
+    st.error("Не найдены критические колонки")
+    st.write(df.columns.tolist())
+    st.stop()
 
-COL_ETD = find_column(["ETD"])
-COL_ATA = find_column(["ATA"])
 
-# ============================================
-# TYPE CONVERT
-# ============================================
+# =========================
+# FORMAT
+# =========================
 
-if COL_WEIGHT:
-    df[COL_WEIGHT] = pd.to_numeric(
-        df[COL_WEIGHT],
-        errors="coerce"
-    )
+df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors="coerce")
+df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
 
-if COL_DATE:
-    df[COL_DATE] = pd.to_datetime(
-        df[COL_DATE],
-        errors="coerce"
-    ).dt.date
+df = df.dropna(subset=[COL_DATE, COL_WEIGHT])
 
-if COL_ETD:
-    df[COL_ETD] = pd.to_datetime(
-        df[COL_ETD],
-        errors="coerce"
-    )
 
 if COL_ATA:
-    df[COL_ATA] = pd.to_datetime(
-        df[COL_ATA],
-        errors="coerce"
-    )
+    df[COL_ATA] = pd.to_datetime(df[COL_ATA], errors="coerce")
 
-# ============================================
-# PROJECT FILTER
-# ============================================
+if COL_ETD:
+    df[COL_ETD] = pd.to_datetime(df[COL_ETD], errors="coerce")
 
-if COL_PROJECT:
 
-    projects = ["Все"] + sorted(
-        df[COL_PROJECT]
-        .dropna()
-        .astype(str)
-        .unique()
-    )
+# =========================
+# FILTER FROM 2026+
+# =========================
 
-    selected = st.radio(
-        "Проект:",
-        projects,
-        horizontal=True
-    )
+df = df[df[COL_DATE] >= "2026-01-01"]
 
-    if selected != "Все":
 
-        df = df[
-            df[COL_PROJECT].astype(str)
-            == selected
-        ]
-
-# ============================================
-# KPI
-# ============================================
-
-total_weight = int(
-    df[COL_WEIGHT].sum()
-) if COL_WEIGHT else 0
-
-total_flights = (
-    df[COL_AWB].nunique()
-    if COL_AWB else 0
-)
-
-avg_weight = int(
-    df[COL_WEIGHT].mean()
-) if COL_WEIGHT else 0
-
-transit = None
+# =========================
+# TRANSIT TIME SAFE
+# =========================
 
 if COL_ETD and COL_ATA:
 
-    temp = df.dropna(
-        subset=[COL_ETD, COL_ATA]
-    ).copy()
+    df["transit"] = (
+        (df[COL_ATA] - df[COL_ETD])
+        .dt.days
+    )
 
-    temp["transit"] = (
-        temp[COL_ATA]
-        -
-        temp[COL_ETD]
-    ).dt.days
+    df.loc[df["transit"] < 0, "transit"] = None
 
-    temp = temp[
-        (temp["transit"] >= 0)
-        &
-        (temp["transit"] <= 15)
-    ]
+else:
+    df["transit"] = None
 
-    if len(temp) > 0:
 
-        transit = round(
-            temp["transit"].mean(),
-            1
-        )
+# =========================
+# HEADER
+# =========================
 
-col1, col2, col3, col4 = st.columns(4)
+st.title("✈️ Логистика Китай → Узбекистан")
 
-col1.metric(
-    "Общий вес",
-    f"{total_weight:,} кг"
+
+# =========================
+# PROJECT FILTER
+# =========================
+
+projects = ["Все"]
+
+if COL_PROJECT:
+    projects += sorted(df[COL_PROJECT].dropna().unique())
+
+project = st.radio(
+    "Проект",
+    projects,
+    horizontal=True
 )
 
-col2.metric(
-    "Количество рейсов",
-    total_flights
-)
+if project != "Все":
+    df = df[df[COL_PROJECT] == project]
 
-col3.metric(
-    "Средний вес",
-    f"{avg_weight} кг"
-)
 
-col4.metric(
-    "Средний transit time",
-    f"{transit} дней" if transit else "-"
-)
+# =========================
+# KPI
+# =========================
 
-# ============================================
-# CHART
-# ============================================
+total_weight = int(df[COL_WEIGHT].sum())
+flights = df[COL_AWB].nunique() if COL_AWB else len(df)
+avg_weight = int(df[COL_WEIGHT].mean())
+
+if df["transit"].dropna().empty:
+    avg_transit = 0
+else:
+    avg_transit = int(df["transit"].mean())
+
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric("Общий вес", f"{total_weight:,} кг")
+c2.metric("Количество рейсов", flights)
+c3.metric("Средний вес", f"{avg_weight:,} кг")
+c4.metric("Средний transit time", f"{avg_transit} дней")
+
+
+# =========================
+# PERIOD
+# =========================
 
 period = st.radio(
-    "Период:",
+    "Период",
     ["По дням", "По неделям", "По месяцам"],
     horizontal=True
 )
 
+
 chart = df.copy()
+
 
 if period == "По дням":
 
-    grouped = chart.groupby(
-        COL_DATE
-    )[COL_WEIGHT].sum().reset_index()
+    chart = (
+        chart.groupby(COL_DATE)[COL_WEIGHT]
+        .sum()
+        .reset_index()
+        .sort_values(COL_DATE)
+    )
 
-    grouped["label"] = grouped[COL_DATE].astype(str)
 
 elif period == "По неделям":
 
-    chart["week"] = pd.to_datetime(
-        chart[COL_DATE]
-    ).dt.to_period("W").astype(str)
+    chart["week"] = chart[COL_DATE].dt.to_period("W").apply(lambda r: r.start_time)
 
-    grouped = chart.groupby(
-        "week"
-    )[COL_WEIGHT].sum().reset_index()
+    chart = (
+        chart.groupby("week")[COL_WEIGHT]
+        .sum()
+        .reset_index()
+        .sort_values("week")
+    )
 
-    grouped["label"] = grouped["week"]
+    chart.rename(columns={"week": COL_DATE}, inplace=True)
+
 
 else:
 
-    chart["month"] = pd.to_datetime(
-        chart[COL_DATE]
-    ).dt.to_period("M").astype(str)
+    chart["month"] = chart[COL_DATE].dt.to_period("M").apply(lambda r: r.start_time)
 
-    grouped = chart.groupby(
-        "month"
-    )[COL_WEIGHT].sum().reset_index()
+    chart = (
+        chart.groupby("month")[COL_WEIGHT]
+        .sum()
+        .reset_index()
+        .sort_values("month")
+    )
 
-    grouped["label"] = grouped["month"]
+    chart.rename(columns={"month": COL_DATE}, inplace=True)
+
+
+# =========================
+# CHART
+# =========================
 
 fig = px.bar(
-
-    grouped,
-
-    x=COL_WEIGHT,
-
-    y="label",
-
-    orientation="h",
-
-    text=COL_WEIGHT,
-
-    height=700
+    chart,
+    x=COL_DATE,
+    y=COL_WEIGHT,
+    text=COL_WEIGHT
 )
 
 fig.update_traces(
@@ -282,29 +242,75 @@ fig.update_traces(
     textangle=0
 )
 
-st.plotly_chart(
-    fig,
-    use_container_width=True
+fig.update_layout(
+    height=500
 )
 
-# ============================================
-# TABLE
-# ============================================
+st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Список партий")
 
-table = df.copy()
+# =========================
+# TABS
+# =========================
 
-table.insert(
-    0,
-    "№",
-    range(
-        1,
-        len(table)+1
+tab1, tab2 = st.tabs([
+    "📦 Shipments",
+    "📦 Split Shipments"
+])
+
+
+# =========================
+# SHIPMENTS TABLE
+# =========================
+
+with tab1:
+
+    search = st.text_input("Поиск")
+
+    table = df.copy()
+
+    if search:
+        table = table.astype(str).apply(
+            lambda row: row.str.contains(search, case=False).any(),
+            axis=1
+        )
+
+        table = df[table]
+
+    table = table.reset_index(drop=True)
+
+    if "№" in table.columns:
+        table = table.drop(columns=["№"])
+
+    table.insert(0, "№", table.index + 1)
+
+    st.dataframe(
+        table,
+        use_container_width=True,
+        height=600
     )
-)
 
-st.dataframe(
-    table,
-    use_container_width=True
-)
+
+# =========================
+# SPLIT TABLE
+# =========================
+
+with tab2:
+
+    if COL_SPLIT:
+
+        split = df[df[COL_SPLIT].astype(str).str.lower() == "да"]
+
+        split = split.reset_index(drop=True)
+
+        split.insert(0, "№", split.index + 1)
+
+        st.dataframe(
+            split,
+            use_container_width=True,
+            height=600
+        )
+
+    else:
+
+        st.info("Нет split shipments")
