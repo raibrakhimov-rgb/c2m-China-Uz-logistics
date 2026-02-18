@@ -74,7 +74,7 @@ COL_ATD = find_col(["atd"], df.columns)
 # строго ATA (колонка N)
 COL_ATA = None
 for col in df.columns:
-    if col.strip().lower() == "ata":
+    if col.lower().strip() == "ata":
         COL_ATA = col
         break
 
@@ -91,7 +91,6 @@ for col in df.columns:
 
     col_low = col.lower()
 
-    # только реальные даты
     if (
         any(x in col_low for x in ["date", "etd", "atd", "eta", "ata"])
         and "дней" not in col_low
@@ -100,7 +99,7 @@ for col in df.columns:
         DATE_COLUMNS.append(col)
 
 
-# безопасная обработка колонок дней
+# fix days columns safely
 
 for col in df.columns:
 
@@ -121,20 +120,13 @@ df = df.dropna(subset=[COL_DATE])
 # REMOVE UNUSED COLUMNS
 # =====================================================
 
-REMOVE = [
-    "pod",
-    "ata_ext",
-    "ata.1",
-    "комментар",
-    "wh_ext"
-]
+REMOVE = ["pod", "ata_ext", "ata.1", "комментар", "wh_ext"]
 
 drop_cols = []
 
 for col in df.columns:
 
     if any(x in col.lower() for x in REMOVE):
-
         drop_cols.append(col)
 
 df = df.drop(columns=drop_cols, errors="ignore")
@@ -169,7 +161,7 @@ def format_dates(data):
 
 
 # =====================================================
-# SIDEBAR
+# SIDEBAR FILTERS
 # =====================================================
 
 st.sidebar.header("Фильтры")
@@ -209,10 +201,8 @@ filtered = filtered[
 
 
 # =====================================================
-# KPI BLOCK
+# KPI CALCULATION
 # =====================================================
-
-st.title("Свод по рейсам Китай-Узбекистан")
 
 total_weight = int(filtered[COL_WEIGHT].sum())
 
@@ -220,8 +210,6 @@ total_shipments = len(filtered)
 
 avg_weight = int(filtered[COL_WEIGHT].mean()) if total_shipments else 0
 
-
-# transit строго ATA - ATD
 
 ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
 
@@ -232,22 +220,37 @@ transit = (ata - atd).dt.days.dropna()
 avg_transit = int(transit.mean()) if len(transit) > 0 else 0
 
 
-c1, c2, c3, c4 = st.columns(4)
+# =====================================================
+# POWER BI HEADER
+# =====================================================
 
-c1.metric("Общий вес", f"{total_weight:,} кг")
+st.markdown("## Свод по рейсам Китай-Узбекистан")
 
-c2.metric("Количество партий", total_shipments)
+st.markdown("---")
 
-c3.metric("Средний вес", f"{avg_weight} кг")
 
-c4.metric("Среднее транзитное время", f"{avg_transit} дней")
+# =====================================================
+# KPI ROW
+# =====================================================
+
+k1, k2, k3, k4 = st.columns(4)
+
+k1.metric("Общий вес", f"{total_weight:,} кг")
+
+k2.metric("Количество партий", f"{total_shipments:,}")
+
+k3.metric("Средний вес", f"{avg_weight:,} кг")
+
+k4.metric("Среднее транзитное время", f"{avg_transit} дней")
+
+st.markdown("---")
 
 
 # =====================================================
 # TREND CHART
 # =====================================================
 
-st.subheader("Перевезенные партии, кг")
+st.markdown("### Перевезенные партии, кг")
 
 trend = (
     filtered
@@ -265,11 +268,55 @@ trend = trend.sort_values("Дата")
 
 trend["Дата"] = trend["Дата"].dt.strftime("%d-%m-%Y")
 
-fig = px.bar(trend, x="Дата", y="Вес", text="Вес")
+fig = px.bar(
+    trend,
+    x="Дата",
+    y="Вес",
+    text="Вес"
+)
+
+fig.update_layout(
+    height=450,
+    plot_bgcolor="white"
+)
 
 fig.update_traces(textposition="outside")
 
 st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("---")
+
+
+# =====================================================
+# BREAKDOWN
+# =====================================================
+
+col1, col2 = st.columns(2)
+
+proj = filtered.groupby(COL_PROJECT)[COL_WEIGHT].sum().reset_index()
+
+via = filtered.groupby(COL_VIA)[COL_WEIGHT].sum().reset_index()
+
+with col1:
+
+    st.markdown("### Объём по проектам")
+
+    st.plotly_chart(
+        px.bar(proj, x=COL_PROJECT, y=COL_WEIGHT, text=COL_WEIGHT),
+        use_container_width=True
+    )
+
+
+with col2:
+
+    st.markdown("### Объём по транзитным городам Китая")
+
+    st.plotly_chart(
+        px.pie(via, names=COL_VIA, values=COL_WEIGHT),
+        use_container_width=True
+    )
+
+st.markdown("---")
 
 
 # =====================================================
@@ -278,10 +325,6 @@ st.plotly_chart(fig, use_container_width=True)
 
 tab1, tab2 = st.tabs(["Список партий", "Дробленные партии"])
 
-
-# =====================================================
-# TAB 1
-# =====================================================
 
 with tab1:
 
@@ -296,8 +339,6 @@ with tab1:
             .str.contains(search, case=False, na=False)
         ]
 
-    table = table.sort_values(COL_DATE)
-
     table = format_dates(table)
 
     table = safe_index(table)
@@ -305,21 +346,14 @@ with tab1:
     st.dataframe(table, use_container_width=True, height=600)
 
 
-# =====================================================
-# TAB 2
-# =====================================================
-
 with tab2:
 
     if COL_SPLIT:
 
         split = filtered[
-            filtered[COL_SPLIT]
-            .astype(str)
+            filtered[COL_SPLIT].astype(str)
             .str.contains("да", case=False, na=False)
         ]
-
-        split = split.sort_values(COL_DATE)
 
         split = format_dates(split)
 
