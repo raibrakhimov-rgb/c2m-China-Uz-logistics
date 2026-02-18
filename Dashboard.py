@@ -9,7 +9,7 @@ from io import BytesIO
 # =====================================================
 
 st.set_page_config(
-    page_title="Executive Dashboard | Свод по рейсам Китай-Узбекистан",
+    page_title="Свод по рейсам Китай-Узбекистан",
     layout="wide"
 )
 
@@ -70,7 +70,8 @@ COL_AWB = find_col(["awb"])
 COL_FLIGHT = find_col(["flight"])
 COL_VIA = find_col(["via"])
 COL_ATD = find_col(["atd"])
-COL_ATA = find_col(["ata.1"])
+COL_ATA = find_col(["ata"])
+COL_SPLIT = find_col(["дроб"])
 
 
 # =====================================================
@@ -79,11 +80,17 @@ COL_ATA = find_col(["ata.1"])
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
 
-df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors="coerce", dayfirst=True)
+DATE_COLS = [COL_DATE, COL_ATD, COL_ATA]
 
-df[COL_ATD] = pd.to_datetime(df[COL_ATD], errors="coerce", dayfirst=True)
+for col in DATE_COLS:
 
-df[COL_ATA] = pd.to_datetime(df[COL_ATA], errors="coerce", dayfirst=True)
+    if col in df.columns:
+
+        df[col] = pd.to_datetime(
+            df[col],
+            errors="coerce",
+            dayfirst=True
+        )
 
 
 # TRANSIT TIME
@@ -93,13 +100,54 @@ df = df.dropna(subset=[COL_DATE])
 
 
 # =====================================================
-# SAFE INDEX FUNCTION
+# REMOVE UNUSED COLUMNS
+# =====================================================
+
+DROP_NAMES = [
+
+    "pod",
+    "ata_ext",
+    "ata.1",
+    "комментар",
+    "transit"
+]
+
+drop_cols = []
+
+for col in df.columns:
+
+    col_low = col.lower()
+
+    for name in DROP_NAMES:
+
+        if name in col_low:
+            drop_cols.append(col)
+
+df = df.drop(columns=drop_cols, errors="ignore")
+
+
+# =====================================================
+# FORMAT DATE FUNCTION
+# =====================================================
+
+def format_dates(df):
+
+    for col in DATE_COLS:
+
+        if col in df.columns:
+
+            df[col] = df[col].dt.strftime("%d-%m-%Y")
+
+    return df
+
+
+# =====================================================
+# SAFE INDEX
 # =====================================================
 
 def safe_index(df):
 
     if "№" in df.columns:
-
         df = df.drop(columns=["№"])
 
     df.insert(0, "№", range(1, len(df) + 1))
@@ -120,7 +168,7 @@ projects = st.sidebar.multiselect(
 )
 
 vias = st.sidebar.multiselect(
-    "VIA",
+    "Транзитный город",
     sorted(df[COL_VIA].dropna().unique()),
     default=sorted(df[COL_VIA].dropna().unique())
 )
@@ -163,7 +211,7 @@ st.title("Свод по рейсам Китай-Узбекистан")
 
 
 # =====================================================
-# KPI BLOCK
+# KPI
 # =====================================================
 
 total_weight = int(filtered[COL_WEIGHT].sum())
@@ -172,7 +220,11 @@ total_shipments = len(filtered)
 
 avg_weight = int(filtered[COL_WEIGHT].mean()) if total_shipments else 0
 
-avg_transit = int(filtered["Transit"].mean()) if filtered["Transit"].notna().sum() else 0
+avg_transit = int(
+    (pd.to_datetime(filtered[COL_ATA]) -
+     pd.to_datetime(filtered[COL_ATD]))
+    .dt.days.mean()
+) if total_shipments else 0
 
 
 c1, c2, c3, c4 = st.columns(4)
@@ -206,14 +258,13 @@ trend["Дата"] = pd.to_datetime(trend["Дата"])
 
 trend = trend.sort_values("Дата")
 
-trend["Дата_str"] = trend["Дата"].dt.strftime("%d-%m-%Y")
-
+trend["Дата"] = trend["Дата"].dt.strftime("%d-%m-%Y")
 
 fig = px.bar(
 
     trend,
 
-    x="Дата_str",
+    x="Дата",
 
     y="Вес",
 
@@ -222,18 +273,7 @@ fig = px.bar(
 
 fig.update_traces(
 
-    textposition="outside",
-
-    textangle=0
-)
-
-fig.update_layout(
-
-    height=500,
-
-    xaxis_title="Дата",
-
-    yaxis_title="Вес"
+    textposition="outside"
 )
 
 st.plotly_chart(
@@ -245,32 +285,7 @@ st.plotly_chart(
 
 
 # =====================================================
-# CUMULATIVE CHART
-# =====================================================
-
-st.subheader("Накопительный объем")
-
-trend["Cumulative"] = trend["Вес"].cumsum()
-
-fig2 = px.line(
-
-    trend,
-
-    x="Дата_str",
-
-    y="Cumulative"
-)
-
-st.plotly_chart(
-
-    fig2,
-
-    use_container_width=True
-)
-
-
-# =====================================================
-# PROJECT BREAKDOWN
+# BREAKDOWN
 # =====================================================
 
 col1, col2 = st.columns(2)
@@ -278,7 +293,7 @@ col1, col2 = st.columns(2)
 
 with col1:
 
-    st.subheader("Объем по проектам")
+    st.subheader("Объём по проектам")
 
     proj = (
         filtered
@@ -299,17 +314,12 @@ with col1:
         text=COL_WEIGHT
     )
 
-    st.plotly_chart(
-
-        fig_proj,
-
-        use_container_width=True
-    )
+    st.plotly_chart(fig_proj, use_container_width=True)
 
 
 with col2:
 
-    st.subheader("Объем по VIA")
+    st.subheader("Объём по транзитным городам Китая")
 
     via = (
         filtered
@@ -327,47 +337,70 @@ with col2:
         values=COL_WEIGHT
     )
 
-    st.plotly_chart(
-
-        fig_via,
-
-        use_container_width=True
-    )
+    st.plotly_chart(fig_via, use_container_width=True)
 
 
 # =====================================================
-# SEARCH TABLE
+# TABS
 # =====================================================
 
-st.subheader("Поиск партии")
+tab1, tab2 = st.tabs([
 
-awb_search = st.text_input("Введите AWB номер")
+    "Список партий",
 
-
-table = filtered.copy()
-
-
-if awb_search:
-
-    table = table[
-        table[COL_AWB]
-        .astype(str)
-        .str.contains(awb_search, case=False, na=False)
-    ]
+    "Дробленные партии"
+])
 
 
-table = table.sort_values(COL_DATE)
+# =====================================================
+# TAB 1
+# =====================================================
 
-table[COL_DATE] = table[COL_DATE].dt.strftime("%d-%m-%Y")
+with tab1:
 
-table = safe_index(table)
+    search = st.text_input("Поиск по AWB")
+
+    table = filtered.copy()
+
+    if search:
+
+        table = table[
+            table[COL_AWB]
+            .astype(str)
+            .str.contains(search, case=False, na=False)
+        ]
+
+    table = table.sort_values(COL_DATE)
+
+    table = format_dates(table)
+
+    table = safe_index(table)
+
+    st.dataframe(table, use_container_width=True, height=600)
 
 
-st.dataframe(
+# =====================================================
+# TAB 2 SPLIT
+# =====================================================
 
-    table,
+with tab2:
 
-    use_container_width=True,
+    if COL_SPLIT:
 
-    height=600
-)
+        split = filtered[
+            filtered[COL_SPLIT]
+            .astype(str)
+            .str.contains("да", case=False, na=False)
+        ]
+
+        split = split.sort_values(COL_DATE)
+
+        split = format_dates(split)
+
+        split = safe_index(split)
+
+        st.dataframe(split, use_container_width=True, height=600)
+
+    else:
+
+        st.info("Нет дробленных партий")
