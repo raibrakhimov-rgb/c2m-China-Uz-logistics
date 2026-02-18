@@ -18,7 +18,7 @@ GID = "1730191747"
 
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx&gid={GID}"
 
-START_ROW = 874  # брать данные с 875 строки
+START_ROW = 874
 
 
 # =====================================
@@ -68,17 +68,22 @@ def find_col(names):
 
 
 COL_PROJECT = find_col(["проект", "project"])
-COL_WEIGHT = find_col(["weight"])
+COL_WEIGHT = find_col(["outbound weight", "weight"])
 COL_DATE = find_col(["outbound date", "date"])
-COL_CARTON = find_col(["carton"])
-COL_AWB = find_col(["awb"])
+COL_CARTON = find_col(["outbound carton", "carton"])
+COL_AWB = find_col(["awb", "booking"])
 COL_FLIGHT = find_col(["flight"])
 COL_VIA = find_col(["via"])
 COL_ETD = find_col(["etd"])
-COL_ETA = find_col(["eta"])
 COL_ATD = find_col(["atd"])
-COL_ATA = find_col(["ata"])
+COL_ETA = find_col(["eta"])
+COL_ATA = find_col(["ata.1"])
 COL_SPLIT = find_col(["дроб"])
+COL_REMARKS = find_col(["remark"])
+
+COL_HUB_DATE = find_col(["поступление на склад хаб"])
+COL_DAYS_TAS = find_col(["дней до прибытия из swe до терминала tas"])
+COL_DAYS_HUB = find_col(["дней до прибытия из swe до хаб"])
 
 
 CRITICAL = [
@@ -100,22 +105,67 @@ if any(x is None for x in CRITICAL):
 
 df[COL_WEIGHT] = pd.to_numeric(df[COL_WEIGHT], errors="coerce")
 
-df[COL_DATE] = pd.to_datetime(
-    df[COL_DATE],
-    errors="coerce",
-    dayfirst=True
-)
+DATE_COLS = [
+    COL_DATE,
+    COL_ETD,
+    COL_ATD,
+    COL_ETA,
+    COL_ATA,
+    COL_HUB_DATE
+]
 
-for c in [COL_ETD, COL_ETA, COL_ATD, COL_ATA]:
+for c in DATE_COLS:
 
-    if c:
+    if c and c in df.columns:
+
         df[c] = pd.to_datetime(
             df[c],
             errors="coerce",
             dayfirst=True
-        )
+        ).dt.date
+
 
 df = df.dropna(subset=[COL_DATE])
+
+
+# =====================================
+# REMOVE UNUSED COLUMNS
+# =====================================
+
+DROP_NAMES = [
+    "pod",
+    "wh_ext",
+    "ata_ext",
+    "поступление на склад"
+]
+
+DROP_COLS = []
+
+for col in df.columns:
+
+    col_low = col.lower()
+
+    for name in DROP_NAMES:
+
+        if name in col_low and "хаб" not in col_low:
+
+            DROP_COLS.append(col)
+
+df = df.drop(columns=DROP_COLS, errors="ignore")
+
+
+# =====================================
+# ROUND TRANSIT DAYS
+# =====================================
+
+for c in [COL_DAYS_TAS, COL_DAYS_HUB]:
+
+    if c and c in df.columns:
+
+        df[c] = pd.to_numeric(
+            df[c],
+            errors="coerce"
+        ).round(0).astype("Int64")
 
 
 # =====================================
@@ -142,6 +192,7 @@ project = st.radio(
 filtered = df.copy()
 
 if project != "Все":
+
     filtered = filtered[
         filtered[COL_PROJECT] == project
     ]
@@ -155,19 +206,21 @@ total_weight = int(filtered[COL_WEIGHT].sum())
 
 total_flights = len(filtered)
 
-avg_weight = int(filtered[COL_WEIGHT].mean())
+avg_weight = int(filtered[COL_WEIGHT].mean()) if total_flights > 0 else 0
+
 
 transit = None
 
 if COL_ETD and COL_ATA:
 
-    transit = (
-        filtered[COL_ATA] - filtered[COL_ETD]
-    ).dt.days
+    etd = pd.to_datetime(filtered[COL_ETD], errors="coerce")
 
-    transit = transit.dropna()
+    ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
 
-avg_transit = int(transit.mean()) if transit is not None and len(transit)>0 else 0
+    transit = (ata - etd).dt.days.dropna()
+
+
+avg_transit = int(transit.mean()) if transit is not None and len(transit) > 0 else 0
 
 
 c1, c2, c3, c4 = st.columns(4)
@@ -191,6 +244,8 @@ period = st.radio(
 
 chart = filtered.copy()
 
+chart[COL_DATE] = pd.to_datetime(chart[COL_DATE], errors="coerce")
+
 if period == "По дням":
 
     grouped = (
@@ -202,9 +257,7 @@ if period == "По дням":
 elif period == "По неделям":
 
     grouped = (
-        chart.groupby(
-            chart[COL_DATE].dt.to_period("W")
-        )[COL_WEIGHT]
+        chart.groupby(chart[COL_DATE].dt.to_period("W"))[COL_WEIGHT]
         .sum()
         .reset_index()
     )
@@ -212,9 +265,7 @@ elif period == "По неделям":
 else:
 
     grouped = (
-        chart.groupby(
-            chart[COL_DATE].dt.to_period("M")
-        )[COL_WEIGHT]
+        chart.groupby(chart[COL_DATE].dt.to_period("M"))[COL_WEIGHT]
         .sum()
         .reset_index()
     )
@@ -240,15 +291,17 @@ fig = px.bar(
 )
 
 fig.update_traces(
-    textposition="inside",
-    textangle=0
+
+    textposition="inside"
 )
 
 fig.update_layout(
+
     height=500
 )
 
 st.plotly_chart(
+
     fig,
     use_container_width=True
 )
@@ -259,8 +312,55 @@ st.plotly_chart(
 # =====================================
 
 tab1, tab2 = st.tabs(
+
     ["Список партий", "Дробленные партии"]
 )
+
+
+# =====================================
+# FINAL COLUMN ORDER
+# =====================================
+
+FINAL_COLUMNS = [
+
+    "№",
+
+    COL_PROJECT,
+    COL_CARTON,
+    COL_WEIGHT,
+    COL_DATE,
+    COL_AWB,
+    COL_FLIGHT,
+    COL_VIA,
+    COL_ETD,
+    COL_ATD,
+    COL_ETA,
+    COL_ATA,
+    COL_HUB_DATE,
+    COL_DAYS_TAS,
+    COL_DAYS_HUB,
+    COL_REMARKS
+]
+
+
+RENAME_MAP = {
+
+    COL_PROJECT: "Проект",
+    COL_CARTON: "Outbound carton",
+    COL_WEIGHT: "Outbound weight",
+    COL_DATE: "Outbound date",
+    COL_AWB: "Booking/AWB NO",
+    COL_FLIGHT: "Flight No.",
+    COL_VIA: "VIA",
+    COL_ETD: "ETD",
+    COL_ATD: "ATD",
+    COL_ETA: "ETA",
+    COL_ATA: "ATA",
+    COL_HUB_DATE: "Поступление на склад ХАБ",
+    COL_DAYS_TAS: "Дней до прибытия из SWE до Терминала TAS",
+    COL_DAYS_HUB: "Дней до прибытия из SWE до ХАБа",
+    COL_REMARKS: "Remarks"
+}
 
 
 # =====================================
@@ -272,17 +372,27 @@ with tab1:
     table = filtered.copy()
 
     if "№" in table.columns:
+
         table = table.drop(columns=["№"])
 
     table.insert(
+
         0,
         "№",
-        range(1, len(table)+1)
+        range(1, len(table) + 1)
     )
 
+    cols = [c for c in FINAL_COLUMNS if c in table.columns]
+
+    table = table[cols]
+
+    table = table.rename(columns=RENAME_MAP)
+
     st.dataframe(
+
         table,
-        use_container_width=True
+        use_container_width=True,
+        height=700
     )
 
 
@@ -306,15 +416,25 @@ with tab2:
         ]
 
         if "№" in split.columns:
+
             split = split.drop(columns=["№"])
 
         split.insert(
+
             0,
             "№",
-            range(1, len(split)+1)
+            range(1, len(split) + 1)
         )
 
+        cols = [c for c in FINAL_COLUMNS if c in split.columns]
+
+        split = split[cols]
+
+        split = split.rename(columns=RENAME_MAP)
+
         st.dataframe(
+
             split,
-            use_container_width=True
+            use_container_width=True,
+            height=700
         )
