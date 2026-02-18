@@ -99,8 +99,6 @@ for col in df.columns:
         DATE_COLUMNS.append(col)
 
 
-# fix days columns safely
-
 for col in df.columns:
 
     if "дней" in col.lower():
@@ -201,7 +199,7 @@ filtered = filtered[
 
 
 # =====================================================
-# KPI CALCULATION
+# KPI CALCULATION (FIXED TRANSIT)
 # =====================================================
 
 total_weight = int(filtered[COL_WEIGHT].sum())
@@ -211,13 +209,19 @@ total_shipments = len(filtered)
 avg_weight = int(filtered[COL_WEIGHT].mean()) if total_shipments else 0
 
 
-ata = pd.to_datetime(filtered[COL_ATA], errors="coerce")
+# --- FIX START ---
 
-atd = pd.to_datetime(filtered[COL_ATD], errors="coerce")
+ata = pd.to_datetime(filtered[COL_ATA], errors="coerce", dayfirst=True)
 
-transit = (ata - atd).dt.days.dropna()
+atd = pd.to_datetime(filtered[COL_ATD], errors="coerce", dayfirst=True)
 
-avg_transit = int(transit.mean()) if len(transit) > 0 else 0
+transit = (ata - atd).dt.days
+
+transit = transit[(transit.notna()) & (transit >= 0)]
+
+avg_transit = int(round(transit.mean(), 0)) if len(transit) > 0 else 0
+
+# --- FIX END ---
 
 
 # =====================================================
